@@ -1,0 +1,26 @@
+name: Run tests for OTUS homework
+
+on:
+  push:
+    branches: kubernetes-*
+  pull_request:
+    branches: kubernetes-*
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout this repo
+      uses: actions/checkout@v2
+      with:
+        ref: ${{ github.ref }}
+    - name: Checkout repo with tests
+      uses: actions/checkout@v2
+      with:
+        repository: "express42/otus-platform-tests"
+        ref: 2022-06
+        path: "./otus-platform-tests/"
+
+    - name: Run tests
+      run: curl https://raw.githubusercontent.com/express42/otus-platform-tests/2022-06/run.sh | bash
