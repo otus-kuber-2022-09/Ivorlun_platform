@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  containers:
+  - name: web
+    image: ivorlun/bitnami-nginx-8000:1.0
+    volumeMounts:
+      - name: app
+        mountPath: /app
+  initContainers:
+  - name: init-myservice
+    image: busybox:1.31
+    command: ['sh', '-c', 'wget -O- https://tinyurl.com/otus-k8s-intro | sh']
+    volumeMounts:
+      - name: app
+        mountPath: "/app"
+  volumes:
+    - name: app
+      emptyDir: {}
