@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: bitnami-nginx-8000
+  name: web
   labels:
-    app: nginx
+    app: web
 spec:
   containers:
-  - name: bitnami-nginx-8000-info
+  - name: web
     image: ivorlun/bitnami-nginx-8000:1.0
   initContainers:
   - name: init-myservice
