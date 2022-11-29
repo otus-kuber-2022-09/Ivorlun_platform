@@ -68,6 +68,8 @@ Controlled By:  ReplicaSet/coredns-64897985d
 
 Использую образ bitnami nginx, который уже использует 1001 пользователя и /app as root https://github.com/bitnami/containers/blob/b8ecc1fc8ebd38d60bb09c348814c16811c58d69/bitnami/nginx/1.23/debian-11/Dockerfile#L55.
 
+1. scheduler определил, на какой ноде запускать pod
+2. kubelet скачал необходимый образ и запустил контейнер
 docker pull ivorlun/bitnami-nginx-8000:1.0
 
 ### Hipster Shop | Задание со * (Frontend pod unhealthy)
