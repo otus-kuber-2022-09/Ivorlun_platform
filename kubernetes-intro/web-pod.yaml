@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bitnami-nginx-8000
+  labels:
+    app: nginx
+spec:
+  containers:
+  - name: bitnami-nginx-8000-info
+    image: ivorlun/bitnami-nginx-8000:1.0
+  initContainers:
+  - name: init-myservice
+    image: busybox:1.31
+    command: ['sh', '-c', 'wget -O- https://tinyurl.com/otus-k8s-intro | sh']
+    volumeMounts:
+      - mountPath: /app
+        name: app
+  volumes:
+    - name: app
+      emptyDir: {}
