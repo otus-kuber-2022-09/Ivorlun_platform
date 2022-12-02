@@ -556,9 +556,12 @@ Ingress и обновляет конфигурацию балансировщи�
 ## TLS termination
 
 Client <--https--> Proxy <--http--> Application
+
 Механизм, при котором запросы снаружи до reverse-proxy идут как обычно шифрованные, но уже от reverse-proxy до приложения идут без шифрования трафика.
+
 Это позволяет разгрузить сервер приложения и оставить эту работу reverse-proxy севрверу.
 Также, если прокся дешифрует трафик, то она начинает понимать его содержимое, а значит, может баланисровать, кешировать и тп
+
 Offloads main server crytpo
 TLS closer to client
 HTTP accelerators (Varnish)
@@ -569,9 +572,12 @@ Load balancing/Service mesh
 В случае kubernetes это легко можно осуществлять с помощью ingress.
 
 ## TLS Forward Proxy
-Но так же есть ещё и фокус сделать TLS forward proxy
+Но так же есть ещё и фокус сделать TLS forward proxy.
+
 Суть в том, что происходит то же TLS termination, только трафик уже шифруется между Proxy и бэкендом своим собственным ключом после его дешифровки проксёй.
+
 Это, с одной стороны позволяет дешифровывать трафик и управлять им - балансировать и кешировать, с другой, устраняет незащищённый канал между бэком и проксёй.
+
 Client <----https enc1----> Proxy <----https enc2----> Application
 
 hostNetwork: true
@@ -593,3 +599,225 @@ externalIP для Service
 Тогда в iptables будут созданы необходимые пробросы внутрь
 Мы уже их видели
 
+
+## Homework part
+
+1. Почему следующая конфигурация валидна, но не имеет смысла?
+livenessProbe:
+exec:
+command:
+- 'sh'
+- '-c'
+- 'ps aux | grep my_web_server_process'
+
+PID 1
+
+2. Бывают ли ситуации, когда она все-таки имеет смысл?
+Да, когда несколько процессов - supervisor или entrypoint.sh
+
+
+
+### Вызов kube-proxy как бинаря
+
+Можно делать прямо так `k -n kube-system exec kube-proxy-h8nlf  -- kube-proxy --help`.
+Здесь можно увидеть какие возомжности есть у куб прокси как логической единицы.
+
+The Kubernetes network proxy runs on each node. This reflects services as defined in the Kubernetes API on each node and can do simple TCP, UDP, and SCTP stream forwarding or round robin TCP, UDP, and SCTP forwarding across a set of backends. Service cluster IPs and ports are currently found through Docker-links-compatible environment variables specifying ports opened by the service proxy. There is an optional addon that provides cluster DNS for these cluster IPs. The user must create a service with the apiserver API to configure the proxy.
+
+Например, можно вызывать cleanup: `kube-proxy --cleanup   If true cleanup iptables and ipvs rules and exit.`
+
+Во-первых, даёт понимание как же всё-таки работает kubernetes на низком уровне.
+Во-вторых, позволяет отлаживаться или тестировать более гибко.
+## Kubectl top
+В некоторых контейнерах отсутствую утилиты для наблюдения за процессами, а также, установщики пакетов (Debian):
+`OCI runtime exec failed: exec failed: unable to start container process: exec: "apt-get": executable file not found in $PATH: unknown`
+Чтобы не заморачиваться в kuber-е существует аналог `docker top`: `kubectl top`, который позволяет смотреть процессы не только pod-а, но и целой node-ы.
+
+Но для этого необходим установленный в кластере компонент metrics-server.
+В minikube решается: `minikube addons enable metrics-server`
+
+## iptables-restore из файла
+
+Можно создавать правила для iptables в виде файла и загружать их из файла, переписывая текущие:
+Для примера, создадим в ВМ с Minikube файл /tmp/iptables.cleanup
+```
+*nat
+-A POSTROUTING -s 172.17.0.0/16 ! -o docker0 -j MASQUERADE
+COMMIT
+*filter
+COMMIT
+*mangle
+COMMIT
+```
+и все правила удаляются: `iptables-restore /tmp/iptables.cleanup`.
+А дальше kube-proxy заново их восстанавливает, так как kube-proxy периодически делает полную синхронизацию правил в своих цепочках.
+
+
+#### Осмысленность ps aux probe
+Полагаю, что причина по которой конфигурация вида
+```
+livenessProbe:
+  exec:
+    command:
+      - 'sh'
+      - '-c'
+      - 'ps aux | grep my_web_server_process'
+```
+бессмысленна в том, что liveness определяет нужно ли перезапуситить контейнер, например из-за зависания приложения. А с учётом того, что процесс приложения вунтри контейнера как правило является основным и, соотвтественно, если контейнер запущен, то существует - описанный подход не поможет определить его истинную работоспособность, а проверка всегда будет успешно проходить.
+Но, скорее всего, имеет некоторый смысл для приложений у которых pid 1 - init, а целевой процесс будет дочерним.
+
+### ClusterIP
+* ClusterIP выделяет IP-адрес для каждого сервиса из особого диапазона (этот адрес виртуален и даже не настраивается на сетевых интерфейсах)
+* Когда pod внутри кластера пытается подключиться к виртуальному IP-адресу сервиса, то node, где запущен pod, меняет адрес получателя в сетевых пакетах на настоящий адрес pod-а.
+* Нигде в сети, за пределами ноды, виртуальный ClusterIP не существует.
+
+> IP-адрес для каждого сервиса из особого диапазона
+> (этот адрес виртуален и даже не настраивается на сетевых интерфейсах)
+
+Every node in a Kubernetes cluster runs a kube-proxy. kube-proxy is responsible for implementing a form of virtual IP for Services of type other than ExternalName.
+
+То есть это функционал типа dnat, который заменяет виртуальный ip ClusterIP > Target Pod IP.
+Соответственно с физических нод этот IP не должен пинговаться - он хранится только в цепочках iptables.
+
+Вот он
+```
+iptables --list -nv -t nat
+ pkts bytes target     prot opt in     out     source               destination
+    1    60 KUBE-MARK-MASQ  tcp  --  *      *      !10.244.0.0/16        10.102.189.119       /* default/web-svc-cip cluster IP */ tcp dpt:80
+    1    60 KUBE-SVC-6CZTMAROCN3AQODZ  tcp  --  *      *       0.0.0.0/0            10.102.189.119       /* default/web-svc-cip cluster IP */ tcp dpt:80
+
+```
+Вот балансировка между 3мя enpoint-ами:
+```
+Chain KUBE-SVC-6CZTMAROCN3AQODZ (1 references)
+ pkts bytes target     prot opt in     out     source               destination
+    0     0 KUBE-SEP-SLOPQOZW34M3DWKM  all  --  *      *       0.0.0.0/0            0.0.0.0/0            /* default/web-svc-cip */ statistic mode random probability 0.33333333349
+    1    60 KUBE-SEP-JXVMOJ4WLIQT6I2K  all  --  *      *       0.0.0.0/0            0.0.0.0/0            /* default/web-svc-cip */ statistic mode random probability 0.50000000000
+    0     0 KUBE-SEP-HA42FWOOMUOBT5YR  all  --  *      *       0.0.0.0/0            0.0.0.0/0            /* default/web-svc-cip */
+
+```
+
+**SEP** - Service Endpoint
+
+**Но!**
+В случае работы через ipvs, а не iptables, clusterIP записывается на сетевой интерфейс и перестаёт быть виртуальным адресом и его можно пинговать!
+При этом правила в iptables построены по-другому. Вместо цепочки правил для каждого сервиса, теперь используются хэш-таблицы (ipset). Можно посмотреть их, установив утилиту ipset.
+
+То есть в iptables хранится минимум - основная инфа по правилам, а в быстрых хэш-таблицах, которые как раз хорошо работают при большом количестве нод - ip-адреса endpoint-ов.
+
+```
+iptables --list -nv -t nat
+ip addr show kube-ipvs0
+ipset list
+Name: KUBE-CLUSTER-IP
+Type: hash:ip,port
+Revision: 5
+Header: family inet hashsize 1024 maxelem 65536
+Size in memory: 584
+References: 2
+Number of entries: 8
+Members:
+10.96.0.10,tcp:53
+10.96.0.1,tcp:443
+10.102.189.119,tcp:80
+10.100.169.199,tcp:80
+10.100.114.194,tcp:8000
+10.100.124.99,tcp:80
+10.96.0.10,tcp:9153
+10.96.0.10,udp:53
+```
+
+### Upgrade UDP > TCP localDNS
+
+В localDNS, который располагается на ноде и кеширует соответствие, используется upgrade to tcp (from udp), чтобы располагаясь за NATом запросы не терялись.
+
+## Kube-proxy vs CNIs (Calico and etc.)
+
+### CNI cares about Pod IP.
+
+CNI Plugin is focusing on building up an overlay network, without which Pods can't communicate with each other. The task of the CNI plugin is to assign Pod IP to the Pod when it's scheduled, and to build a virtual device for this IP, and make this IP accessable from every node of the cluster.
+
+### kube-proxy
+
+kube-proxy's job is rather simple, it just redirect requests from Cluster IP to Pod IP.
+kube-proxy has two mode, IPVS and iptables.
+https://stackoverflow.com/a/54881661
+
+
+Kube-proxy process handles everything related to Services on each node. It ensures that connections to the service cluster IP and port go to a pod that backs the service. If backed by more than one service, kube-proxy load-balances traffic across pods.
+https://docs.projectcalico.org/networking/use-ipvs
+Calico gives you a choice of dataplanes, including a pure Linux eBPF dataplane, a standard Linux networking dataplane, and a Windows HNS dataplane.
+
+
+
+
+## IPVS
+IPVS (IP Virtual Server) implements transport-layer load balancing, usually called Layer 4 LAN switching, as part of Linux kernel.
+
+IPVS runs on a host and acts as a load balancer in front of a cluster of real servers. IPVS can direct requests for TCP and UDP-based services to the real servers, and make services of real servers appear as virtual services on a single IP address.
+
+Разница в балансировке сервисов между iptables и ipvs следующая. Допустим 3 пода, на которые может уходить трафик с сервиса:
+* iptables: последовательная цепочка правил 0.33 * ip pod1 > 0.5 * pod2 > pod3 - И эти вероятности выбора пода динамически изменяются в зависимости от масштабирования.
+* ipvs: изначально балансер и в него вшит менее топорный механизм балансировки (least load, least connections, locality, weighted, etc. http://www.linuxvirtualserver.org/docs/scheduling.html) и достаточно добавить ip нового пода, а не обновлять правила каждый раз.
+Причём для балансера создаётся виртуальный сетевой интерфейс, на котором будут все адреса подов, которые подходят сервису.
+```
+kube-ipvs0: <BROADCAST,NOARP> mtu 1500 qdisc noop state DOWN group default
+    link/ether 2e:f7:f3:b2:35:a4 brd ff:ff:ff:ff:ff:ff
+    inet 10.102.189.119/32 scope global kube-ipvs0
+       valid_lft forever preferred_lft forever
+    inet 10.100.124.99/32 scope global kube-ipvs0
+       valid_lft forever preferred_lft forever
+    inet 10.100.114.194/32 scope global kube-ipvs0
+       valid_lft forever preferred_lft forever
+    inet 10.96.0.1/32 scope global kube-ipvs0
+       valid_lft forever preferred_lft forever
+    inet 10.96.0.10/32 scope global kube-ipvs0
+       valid_lft forever preferred_lft forever
+```
+Вместо цепочки правил для каждого сервиса, теперь используются хэш-таблицы (ipset). Можно посмотреть их используя `ipset list`.
+```
+Name: KUBE-CLUSTER-IP
+Type: hash:ip,port
+Revision: 5
+Header: family inet hashsize 1024 maxelem 65536
+Size in memory: 640
+References: 2
+Number of entries: 7
+Members:
+10.102.189.119,tcp:80
+10.96.0.10,tcp:53
+10.96.0.10,udp:53
+10.100.124.99,tcp:80
+10.96.0.10,tcp:9153
+10.96.0.1,tcp:443
+10.100.114.194,tcp:8000
+```
+
+#### Snippet for enabling IPVS mode, cleaning up routing rules and creating new route
+```
+kubectl get configmap kube-proxy -n kube-system -o yaml | \
+  sed -e "s/mode: \"\"/mode: \"ipvs\"/" | \
+  kubectl apply -f - -n kube-system
+kubectl get configmap kube-proxy -n kube-system -o yaml | \
+  sed -e "s/strictARP: false/strictARP: true/" | \
+  kubectl apply -f - -n kube-system
+
+kubectl --namespace kube-system delete pod --selector='k8s-app=kube-proxy'
+
+minikube ssh "sudo -i"
+sed -i "s/nameserver 192.168.49.1/nameserver 192.168.49.1\nnameserver 1.1.1.1/g" /etc/resolv.conf > /etc/resolv.conf.new
+mv /etc/resolv.conf.new /etc/resolv.conf
+
+cat <<EOF >> /tmp/iptables.cleanup
+*nat
+-A POSTROUTING -s 172.17.0.0/16 ! -o docker0 -j MASQUERADE
+COMMIT
+*filter
+COMMIT
+*mangle
+COMMIT
+EOF
+iptables-restore /tmp/iptables.cleanup
+
+sudo ip route add 172.17.255.0/24 via 192.168.49.2
+```
