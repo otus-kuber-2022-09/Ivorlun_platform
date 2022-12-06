@@ -800,7 +800,8 @@ kube-ipvs0: <BROADCAST,NOARP> mtu 1500 qdisc noop state DOWN group default
     inet 10.96.0.10/32 scope global kube-ipvs0
        valid_lft forever preferred_lft forever
 ```
-
+## DNS Debug handbook
+https://kubernetes.io/docs/tasks/administer-cluster/dns-debugging-resolution/
 
 ### Проблема DNS, с которой столкнулся во время домашки iptables > ipvs.
 
@@ -858,6 +859,7 @@ COMMIT
 Это позволяет обойти проблему с нерабочей сетью в minikube и необходимостью прописывать nameserver-ы в /etc/resolv.conf или изменять cm coredns upstreamnameservers https://kubernetes.io/docs/tasks/administer-cluster/dns-custom-nameservers/.
 
 Это супер большая проблема так как из-за неё нельзя ничего задеплоить в кластер, любая загрузка из интернета ломается.
+Встречалась не только у меня - https://otus-devops.slack.com/archives/C04139FTKC5/p1666525079135599.
 ## Forwarding Information Base trie (Aka FIB trie)
 
 Префиксное дерево, которое используется при хранении префиксов ip-адресов внутри маршрутов и мостов. Compressed variants of tries, such as databases for managing Forwarding Information Base (FIB), are used in storing IP address prefixes within routers and bridges for prefix-based lookup to resolve mask-based operations in IP routing.
@@ -892,7 +894,29 @@ kubectl apply -f - -n kube-system
 
 
 ### MetalLB
-Использую актуальную версию metallb (`kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.13.7/config/manifests/metallb-native.yaml`), так как PodSecurityPolicy in the policy/v1beta1 API version is no longer served in v1.25, and the PodSecurityPolicy admission controller was removed.
+Использую актуальную версию metallb (`kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.13.7/config/manifests/metallb-native.yaml`), так как в версии 1.25 куба нет PodSecurityPolicy: in the policy/v1beta1 API version is no longer served in v1.25, and the PodSecurityPolicy admission controller was removed.
+
+Далее в связи с багом https://github.com/metallb/metallb/issues/1597 вебхука пришлось удалить под контроллера после развёртки всех объектов metallb - иначе он не мог подцепить сертификат.
+
+После этого необходимо было заменить конфиг из домашки на новую версию конфига в виде CRD:
+```
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: default
+  namespace: metallb-system
+spec:
+  addresses:
+    - "172.17.255.1-172.17.255.255"
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: default
+  namespace: metallb-system
+```
+После чего был успешно присвоен внешний ip-адрес.
+Комментарий на github - https://github.com/metallb/metallb/issues/1597#issuecomment-1340106498.
 
 #### Share single ip for several services
 ```
