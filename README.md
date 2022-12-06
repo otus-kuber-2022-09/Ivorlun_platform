@@ -693,6 +693,13 @@ ClusterIP удобны в тех случаях, когда:
 * Подключения клиентов к кластеру БД (multi-read) или хранилищу
 * Простейшая (не совсем, use IPVS, Luke) балансировка нагрузки внутри кластера
 
+В каждом неймспейсе есть ClusterIP, который предоставляет доступ к api-server-у всем компонентам namespace-а. **Кто его запускает?**
+```
+Name:              kubernetes
+Namespace:         default
+Labels:            component=apiserver
+                   provider=kubernetes
+```
 
 * ClusterIP выделяет IP-адрес для каждого сервиса из особого диапазона (этот адрес виртуален и даже не настраивается на сетевых интерфейсах)
 * Когда pod внутри кластера пытается подключиться к виртуальному IP-адресу сервиса, то node, где запущен pod, меняет адрес получателя в сетевых пакетах на настоящий адрес pod-а.
@@ -795,56 +802,65 @@ kube-ipvs0: <BROADCAST,NOARP> mtu 1500 qdisc noop state DOWN group default
 ```
 
 
+### Проблема DNS, с которой столкнулся во время домашки iptables > ipvs.
 
+Если менять kube-proxy mode на ipvs "на горячую", то возникает проблема с тем, что правила iptables не стираются даже после удаления pod kube-proxy. В домашке предлагается полная очистка правил на уровне самого контейнера minikube через iptables-restore. **Но** в качестве DNS-резолвера в `/etc/resolv.conf` minikube указан 192.168.49.1:53 - то есть IP-адрес хоста на котором развёрнут уже сам minikube. Сейчас minikube почти везде разворачивается через docker-in-docker, соответственно очистка всех правил приводит к тому, что DNS во всём кластере и в самом контейнере minikube перестаёт работать.
 
+После того как kube-proxy переводится в режим ipvs, а в контейнере minikube очищаются цепочки правил через iptables-restore из пустого файла, то, при синхронизации kube-proxy цепочек в хэшмапы ipvs:
+1. Правила и цепочки, которые были свзяаны с выходом на DNS основного хоста 192.168.49.1:53 стираются из iptables из-за iptables-restore.
+1. Восстанавливаются правила только для kubernetes, но не для docker bridge-а.
+1. В `/etc/resolv.conf` самого хоста куба сохраняется запись `nameserver 192.168.49.1`
+1. Все DNS-запросы изнутри кластера уходят на ClusterIP kube-dns, который отправляет их наружу  minikube, где они и застревают, так как за его пределы выйти уже не могут.
 
-#### Snippet for enabling IPVS mode, cleaning up routing rules and creating new route
+**В итоге я сделал следующую команду для сохранения цепочек моста**:
+`iptables-save | grep -E '192.168.|docker0|DOCKER|\*|COMMIT' > /tmp/iptables.cleanup`
 
-После зачистки правил и уничтожения куб прокси, почему-то накрылся DNS внутри minikube-а.
-Но, может быть, из-за подключения к VPN-у, который переписал на хосте resolv.conf.
-
-В общем постоянная проблема в миникубе - приходится изменять внутри контейнера миникуба resolv или изменять cm coredns примерно так https://kubernetes.io/docs/tasks/administer-cluster/dns-custom-nameservers/#example-1:
+После чего получился следующий дамп правил:
 ```
-apiVersion: v1
-data:
-  stubDomains: |
-        {"abc.com" : ["1.2.3.4"], "my.cluster.local" : ["2.3.4.5"]}
-  upstreamNameservers: |
-        ["8.8.8.8", "8.8.4.4"]
-kind: ConfigMap
-```
-
-```
-kubectl get configmap kube-proxy -n kube-system -o yaml | \
-  sed -e "s/mode: \"\"/mode: \"ipvs\"/" | \
-  kubectl apply -f - -n kube-system
-kubectl get configmap kube-proxy -n kube-system -o yaml | \
-  sed -e "s/strictARP: false/strictARP: true/" | \
-  kubectl apply -f - -n kube-system
-
-kubectl --namespace kube-system delete pod --selector='k8s-app=kube-proxy'
-
-minikube ssh "sudo -i"
-sed -i "s/nameserver 192.168.49.1/nameserver 192.168.49.1\nnameserver 1.1.1.1/g" /etc/resolv.conf > /etc/resolv.conf.new
-mv /etc/resolv.conf.new /etc/resolv.conf
-
-cat <<EOF >> /tmp/iptables.cleanup
 *nat
+:DOCKER_OUTPUT - [0:0]
+:DOCKER_POSTROUTING - [0:0]
+:DOCKER - [0:0]
+-A PREROUTING -d 192.168.49.1/32 -j DOCKER_OUTPUT
+-A PREROUTING -m addrtype --dst-type LOCAL -j DOCKER
 -A POSTROUTING -s 172.17.0.0/16 ! -o docker0 -j MASQUERADE
+-A POSTROUTING -d 192.168.49.1/32 -j DOCKER_POSTROUTING
+-A OUTPUT -d 192.168.49.1/32 -j DOCKER_OUTPUT
+-A OUTPUT ! -d 127.0.0.0/8 -m addrtype --dst-type LOCAL -j DOCKER
+-A DOCKER_OUTPUT -d 192.168.49.1/32 -p tcp -m tcp --dport 53 -j DNAT --to-destination 127.0.0.11:46227
+-A DOCKER_OUTPUT -d 192.168.49.1/32 -p udp -m udp --dport 53 -j DNAT --to-destination 127.0.0.11:37174
+-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p tcp -m tcp --sport 46227 -j SNAT --to-source 192.168.49.1:53
+-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p udp -m udp --sport 37174 -j SNAT --to-source 192.168.49.1:53
+-A DOCKER -i docker0 -j RETURN
 COMMIT
 *filter
+:DOCKER - [0:0]
+:DOCKER-ISOLATION-STAGE-1 - [0:0]
+:DOCKER-USER - [0:0]
+:DOCKER-ISOLATION-STAGE-2 - [0:0]
+-A FORWARD -j DOCKER-USER
+-A FORWARD -j DOCKER-ISOLATION-STAGE-1
+-A FORWARD -o docker0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A FORWARD -o docker0 -j DOCKER
+-A FORWARD -i docker0 ! -o docker0 -j ACCEPT
+-A FORWARD -i docker0 -o docker0 -j ACCEPT
+-A DOCKER-ISOLATION-STAGE-1 -i docker0 ! -o docker0 -j DOCKER-ISOLATION-STAGE-2
+-A DOCKER-ISOLATION-STAGE-1 -j RETURN
+-A DOCKER-USER -j RETURN
+-A DOCKER-ISOLATION-STAGE-2 -o docker0 -j DROP
+-A DOCKER-ISOLATION-STAGE-2 -j RETURN
 COMMIT
 *mangle
 COMMIT
-EOF
-iptables-restore /tmp/iptables.cleanup
-
-sudo ip route add 172.17.255.0/24 via 192.168.49.2
 ```
+Из которого уже делал `iptables-restore /tmp/iptables.cleanup`.
 
+Это позволяет обойти проблему с нерабочей сетью в minikube и необходимостью прописывать nameserver-ы в /etc/resolv.conf или изменять cm coredns upstreamnameservers https://kubernetes.io/docs/tasks/administer-cluster/dns-custom-nameservers/.
+
+Это супер большая проблема так как из-за неё нельзя ничего задеплоить в кластер, любая загрузка из интернета ломается.
 ## Forwarding Information Base trie (Aka FIB trie)
 
-Префиксное дерево, которое используется в
+Префиксное дерево, которое используется при хранении префиксов ip-адресов внутри маршрутов и мостов. Compressed variants of tries, such as databases for managing Forwarding Information Base (FIB), are used in storing IP address prefixes within routers and bridges for prefix-based lookup to resolve mask-based operations in IP routing.
 
 IPv4 Routing Subsystem, in specifically the Forwarding Information Base trie (Aka FIB trie). The FIB trie is the main data structure used by the IPv4, it defines the routing trie and can be used by us to collect our IP addresses, gateway IP, netmask, etc.
 https://medium.com/bash-tips-and-tricks/getting-the-linux-ip-address-without-any-package-ifconfig-ip-address-etc-7b1363077964
@@ -965,3 +981,31 @@ $
 </body>
 </html>
 ```
+
+
+
+## Ephemeral Containers
+
+Since Pods are just groups of semi-fused containers and the isolation between containers in a Pod is weakened, such a new container could be used to inspect the other containers in the (acting up) Pod regardless of their state and content.
+
+And that's how we get to the idea of an Ephemeral Container - "a special type of container that runs temporarily in an existing Pod to accomplish user-initiated actions such as troubleshooting."
+
+k debug -n <namespace> <pod-to-debug> --image=busybox
+
+https://iximiuz.com/en/posts/kubernetes-ephemeral-containers/
+
+## Debugging pods!
+
+1. kubectl describe
+1. kubectl get events
+1. kubectl logs
+1. kubectl exec -it <pod> -- sh
+1. kubectl debug -n <namespace> <pod-to-debug> --image=busybox
+1. kubectl debug mypod -it --copy-to=my-debugger --image=debian --set-image=app=app:debug,sidecar=sidecar:debug (Which creates a copy of mypod adding a debug container and changing container images.)
+1. kubectl debug node/mynode -it --image=ubuntu (Debugging via a shell on the node. Don't forget to clean up it.)
+
+Also there are option to combine any way below:
+* Debugging using a copy of the Pod
+* Copying a Pod while adding a new container
+* Copying a Pod while changing its command
+* Copying a Pod while changing container images
