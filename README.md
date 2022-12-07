@@ -1049,3 +1049,31 @@ Now we need to find the token we can use to log in. Execute the following comman
 kubectl -n kubernetes-dashboard create token admin-user
 
 Now copy the token and paste it into the Enter token field on the login screen.
+
+### Ingress context path shift to root problem
+
+При наличии в приложении basehref ресурсы неправильно маппятся и не дают открывать сайты.
+https://github.com/kubernetes/ingress-nginx/issues/2557#issuecomment-619513010
+```
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /dashboard
+```
+Похоже, что ингресс nginx-а не должен переписывать / и сдвигать контекст: т.е. если ингресс имеет endpoint вида
+https://ingress/dashboard/index.html, то он не может, просто убрав префикс, заммапить запрос в контейнер, в котором в location / лежит index.html и работает по урлу https://endpoint/index.html.
+
+В общем получилось исправить следующей конфигурацией, наподобие примеру https://github.com/kubernetes/ingress-nginx/blob/controller-v1.6.0/docs/examples/rewrite/README.md:
+
+```
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /dashboard(/|$)(.*)
+```

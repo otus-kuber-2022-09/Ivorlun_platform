@@ -4,15 +4,16 @@ metadata:
   name: kubernetes-dashboard
   namespace: kubernetes-dashboard
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
-    nginx.ingress.kubernetes.io/enable-cors: "false"
 spec:
   ingressClassName: nginx
   rules:
   - http:
       paths:
-      - path: /dashboard
+      - path: /dashboard(/|$)(.*)
+#dashboard has basehref to / and relative paths of resources to it
+#https://github.com/kubernetes/ingress-nginx/issues/2557#issuecomment-619513010
         pathType: Prefix
         backend:
           service:
