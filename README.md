@@ -414,14 +414,29 @@ kubelet может опрашивать состояние контейнеро�
 # Homework 4 (Networks)
 
 ## Service
-Cоздает имя,которое можно запросить при помощи DNS
-
 Виды сервисов
 * ClusterIP (+ Headless service `clusterIP: None`)
 * NodePort
 * LoadBalancer
+* ExternalName
 
-## Local link
+## Service ExternalName
+Services of type ExternalName map a Service to a DNS name, not to a typical selector such as my-service or cassandra. You specify these Services with the spec.externalName parameter.
+```
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+  namespace: prod
+spec:
+  type: ExternalName
+  externalName: my.database.example.com
+```
+Note: ExternalName accepts an IPv4 address string, but as a DNS name comprised of digits, not as an IP address. ExternalNames that resemble IPv4 addresses are not resolved by CoreDNS or ingress-nginx because ExternalName is intended to specify a canonical DNS name. To hardcode an IP address, consider using headless Services.
+
+When looking up the host my-service.prod.svc.cluster.local, the cluster DNS Service returns a CNAME record with the value my.database.example.com.
+
+## **Local link**
 169.254/16 - local link подсеть: Всё что попадает в эту подсеть никогда не выйдет за пределы этой подсети.
 ## Node local DNS cache
 10.0.0.10 - cluster.local
@@ -535,10 +550,8 @@ clusterIP: None
 * Который делает DNAT на адреса Pods
 
 ## LoadBalancer
-Этот вид сервиса предназначен только для облачных провайдеров
-Которые своими программными средствами реализуют балансировку
-нагрузки
-В Bare Metal это делается чуть иначе - понадобится MetalLB
+* Этот вид сервиса предназначен только для облачных провайдеров, которые своими программными средствами реализуют балансировку нагрузки.
+* В Bare Metal это делается чуть иначе - используется MetalLB
 
 ## Ingress
 Объект управляющий внешним доступом к сервисам внутри кластера, по факту набор правил внутри кластера Kubernetes.
@@ -572,11 +585,11 @@ Ingress и обновляет конфигурацию балансировщи�
 Это позволяет разгрузить сервер приложения и оставить эту работу reverse-proxy севрверу.
 Также, если прокся дешифрует трафик, то она начинает понимать его содержимое, а значит, может баланисровать, кешировать и тп
 
-Offloads main server crytpo
-TLS closer to client
-HTTP accelerators (Varnish)
-Intrusion detection systems - если тебя атакуют проще сниффить трафик после дешифровки
-Load balancing/Service mesh
+* Offloads main server crytpo
+* TLS closer to client
+* HTTP accelerators (Varnish)
+* Intrusion detection systems - если тебя атакуют проще сниффить трафик после дешифровки
+* Load balancing/Service mesh
 
 
 В случае kubernetes это легко можно осуществлять с помощью ingress.
@@ -860,6 +873,7 @@ COMMIT
 
 Это супер большая проблема так как из-за неё нельзя ничего задеплоить в кластер, любая загрузка из интернета ломается.
 Встречалась не только у меня - https://otus-devops.slack.com/archives/C04139FTKC5/p1666525079135599.
+
 ## Forwarding Information Base trie (Aka FIB trie)
 
 Префиксное дерево, которое используется при хранении префиксов ip-адресов внутри маршрутов и мостов. Compressed variants of tries, such as databases for managing Forwarding Information Base (FIB), are used in storing IP address prefixes within routers and bridges for prefix-based lookup to resolve mask-based operations in IP routing.
@@ -919,6 +933,7 @@ metadata:
 Комментарий на github - https://github.com/metallb/metallb/issues/1597#issuecomment-1340106498.
 
 #### Share single ip for several services
+By default, Services do not share IP addresses. If you have a need to colocate services on a single IP, you can enable selective IP sharing by adding the metallb.universe.tf/allow-shared-ip annotation to services.
 ```
   annotations:
     metallb.universe.tf/allow-shared-ip: "true"
@@ -942,70 +957,61 @@ ARP (address resolution protocol) используется для конверт
 * В реальном окружении это решается добавлением нужной подсети на интерфейс сетевого оборудования
 * Или использованием L3-режима (что потребует усилий от сетевиков, но более предпочтительно)
 
+### Задание со ⭐️ | DNS через MetalLB
+
+В документации MetalLB (v0.13.7) устаревшая информация:
+> Kubernetes does not currently allow multiprotocol LoadBalancer services. This would normally make it impossible to run services like DNS, because they have to listen on both TCP and UDP. To work around this limitation of Kubernetes with MetalLB, create two services (one for TCP, one for UDP), both with the same pod selector. Then, give them the same sharing key and spec.loadBalancerIP to colocate the TCP and UDP serving ports on the same IP address.
+
+На самом деле с версии 1.24 для сервисов типа LB можно использовать несколько протоколов (https://kubernetes.io/docs/concepts/services-networking/service/#load-balancers-with-mixed-protocol-types), более того -
+фича включена по умолчанию и не нужно создавать 2 сервиса, которые бы объединялись с помощью аннотации `metallb.universe.tf/allow-shared-ip: "true"` как раньше.
+
+`kube-system      service/dns-svc-lb        LoadBalancer   10.101.92.187   172.17.255.2   53:30821/TCP,53:30821/UDP`
+
+Ответ с хоста после добавление маршрута до пула адресов LB через интерфейс minikube (sudo ip r add 172.17.255.0/24 via 192.168.49.2):
+
+```
+❯ nslookup kubernetes.default.svc.cluster.local 172.17.255.2
+Server:		172.17.255.2
+Address:	172.17.255.2#53
+
+Name:	kubernetes.default.svc.cluster.local
+Address: 10.96.0.1
+```
+
+### Load balancers with mixed protocol types
+The feature gate MixedProtocolLBService (enabled by default for the kube-apiserver as of v1.24) allows the use of different protocols for LoadBalancer type of Services, when there is more than one port defined.
+
+https://kubernetes.io/docs/concepts/services-networking/service/#load-balancers-with-mixed-protocol-types
+
 ## Ingress
+**ВСЕГДА! Указывать ingressClassName.**
+
+If the ingressClassName is omitted, a default Ingress class should be defined.
+
+В моём случае отсутствие привело к тому, что ингресс создавался некорректно и LoadBalancer Metallb отказался связывать LB с pod-ами ingress-а, для которых предназначался.
+При этом у моего же ingress-а, оказалась следующая опция: Ingress-NGINX controller can be configured with a flag --watch-ingress-without-class.
+
+#### service.spec.externalTrafficPolicy
+externalTrafficPolicy denotes if this Service desires to route external traffic to node-local or cluster-wide endpoints.
+* "Local" preserves the client source IP and avoids a second hop for LoadBalancer and Nodeport type services, but risks potentially imbalanced traffic spreading.
+* "Cluster" obscures the client source IP and may cause a second hop to another node, but should have good overall load-spreading
+
+By setting ExternalTrafficPolicy=local, nodes only route traffic to pods that are on the same node, which then preserves client IP (e.g., a browser or mobile application). It’s important to recognize that ExternalTrafficPolicy is not a way to preserve source IP; it’s a change in networking policy that happens to preserve source IP.
+
+
 ### Ingress headless service
 Классная тема вязать ингресс на балансер
-1. Создаём сервис типа LB, который балансирует 80 и 443 в namespace: ingress-nginx, перехватывая трафик ingress-контроллера, выбирая его по селектору
+1. Создаём сервис типа LB, который балансирует 80 и 443 в namespace: ingress-nginx, перехватывая трафик pod-а ingress-контроллера, выбирая его по селектору
 1. Создаём сервис типа ClusterIP, но без clusterIP! (clusterIP: None), который выбирает приложение по селектору https://kubernetes.io/docs/concepts/services-networking/service/#headless-services
 1. Создаём ingress, который проксирует наше приложение, выбирая сервис ClusterIP по backend service name и port.
 
 Из этого получится - единая точка входа, которая балансируется с полными возможностями metallb и openresty nginx-а.
 
-
-### Ingress creation code snippet out of date
-
-Сейчас другой синтаксис и доступно в v1, а не v1beta1 версии: https://kubernetes.io/docs/concepts/services-networking/ingress/#the-ingress-resource
-
-### Ingress context path shift to root problem
-```
-spec:
-  rules:
-  - http:
-      paths:
-      - path: /web
-```
-Похоже, что ингресс nginx-а не должен переписывать / и сдвигать контекст: т.е. если ингресс имеет endpoint вида
-https://ingress/web/index.html, то он не может, просто убрав префикс, замапить запрос в контейнер, в котором в location / лежит index.html и работает по урлу https://endpoint/index.html.
-
-В общем получилось исправить следующей конфигурацией, наподобие примеру https://github.com/kubernetes/ingress-nginx/blob/main/docs/examples/rewrite/README.md#rewrite-target:
-
-```
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: web
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
-spec:
-  ingressClassName: nginx
-  rules:
-  - http:
-      paths:
-      - path: /web(/|$)(.*)
-        pathType: Prefix
-        backend:
-          service:
-            name: web-svc
-            port:
-              number: 80
-
-```
-Суть связки в том, что ЛБ даёт возможность получить доступ извне внутрь кластера и резервирует для этого адрес, а ingress позволяет разделить доступ к разным сервисам, например, по контекстному пути.
-Т.е. если удалить ингресс выше, то доступ к сервису пропадёт, несмотря на то, что балансировщик будет работать:
-```
-❯ k delete -f ../web-ingress.yaml
-ingress.networking.k8s.io "web" deleted
-$
-❯ curl -k https://172.17.255.2/web/index.html
-<html>
-<head><title>404 Not Found</title></head>
-<body>
-<center><h1>404 Not Found</h1></center>
-<hr><center>nginx</center>
-</body>
-</html>
-```
-
+То есть при MetalLB External IP + Ingress запрос извне проходит следующую цепочку:
+1. Приходит на внешний ip-адрес MetalLB балансировщика nginx-ingress LoadBalancer Service
+1. Из балансировщика перенаправляется в nginx-ingress-controller pod
+1. Из ingress-а запрос уходит на нужный ClusterIP сервис, который указан в rules и backend-е
+1. Из ClusterIP сервиса уже попадает в целевые pod-ы
 
 
 ## Ephemeral Containers
@@ -1033,3 +1039,13 @@ Also there are option to combine any way below:
 * Copying a Pod while adding a new container
 * Copying a Pod while changing its command
 * Copying a Pod while changing container images
+
+
+
+https://github.com/kubernetes/dashboard/blob/v2.7.0/docs/user/access-control/creating-sample-user.md
+
+Now we need to find the token we can use to log in. Execute the following command:
+
+kubectl -n kubernetes-dashboard create token admin-user
+
+Now copy the token and paste it into the Enter token field on the login screen.
