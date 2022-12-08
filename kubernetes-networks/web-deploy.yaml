@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 100%
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - name: web
+        image: ivorlun/bitnami-nginx-8000:1.0
+        readinessProbe:
+          httpGet:
+            path: /index.html
+            port: 8000
+        livenessProbe:
+          tcpSocket:
+            port: 8000
+        volumeMounts:
+          - name: app
+            mountPath: /app
+        resources:
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      initContainers:
+      - name: init-myservice
+        image: busybox:1.31
+        command: ['sh', '-c', 'wget -O- https://tinyurl.com/otus-k8s-intro | sh']
+        volumeMounts:
+          - name: app
+            mountPath: "/app"
+      volumes:
+        - name: app
+          emptyDir: {}

@@ -8,9 +8,20 @@ spec:
   containers:
   - name: web
     image: ivorlun/bitnami-nginx-8000:1.0
+    readinessProbe:
+      httpGet:
+        path: /index.html
+        port: 8000
+    livenessProbe:
+      tcpSocket:
+        port: 8000
     volumeMounts:
       - name: app
         mountPath: /app
+    resources:
+      limits:
+        cpu: 200m
+        memory: 128Mi
   initContainers:
   - name: init-myservice
     image: busybox:1.31
