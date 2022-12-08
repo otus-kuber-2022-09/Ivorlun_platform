@@ -1138,10 +1138,10 @@ https://docs.flagger.app/usage/deployment-strategies
 Причём, ingress canary включается только при наличии в запросе header-а `canary=forsure`:
 ```
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /$3
+    nginx.ingress.kubernetes.io/rewrite-target: /
     nginx.ingress.kubernetes.io/canary: "true"
-    nginx.ingress.kubernetes.io/canary-by-header: "canary"
-    nginx.ingress.kubernetes.io/canary-by-header-value: "forsure"
+    nginx.ingress.kubernetes.io/canary-by-header: "x-region"
+    nginx.ingress.kubernetes.io/canary-by-header-value: "us-east"
 ```
 
 Наконец, есть комбинация из L4-балансировщика с внешним IP, подов ингресс-контроллера, привязанных ClusterIP сервисов и конечных подов.
@@ -1195,7 +1195,6 @@ Flagger implements several deployment strategies (Canary releases, A/B testing, 
 
 Прекрасное описание стретегий развёртывания
 https://docs.flagger.app/usage/deployment-strategies
-
 
 
 
