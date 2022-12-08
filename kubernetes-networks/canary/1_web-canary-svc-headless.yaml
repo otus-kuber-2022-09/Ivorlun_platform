@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-canary-svc
+spec:
+  selector:
+    app: web-canary
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP

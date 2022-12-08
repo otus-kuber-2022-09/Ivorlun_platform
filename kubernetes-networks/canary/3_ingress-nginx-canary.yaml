@@ -2,7 +2,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: web
+  name: web-canary
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
     nginx.ingress.kubernetes.io/canary: "true"
@@ -17,13 +17,6 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: web-svc
+            name: web-canary-svc
             port:
-              number: 8000
-      - path: /dashboard
-        pathType: Prefix
-        backend:
-          service:
-            name: kubernetes-dashboard
-            port:
-              number: 443
+              number: 80

@@ -991,6 +991,11 @@ If the ingressClassName is omitted, a default Ingress class should be defined.
 В моём случае отсутствие привело к тому, что ингресс создавался некорректно и LoadBalancer Metallb отказался связывать LB с pod-ами ingress-а, для которых предназначался.
 При этом у моего же ingress-а, оказалась следующая опция: Ingress-NGINX controller can be configured with a flag --watch-ingress-without-class.
 
+
+Примеры работы с ингрессом и сервис для тестов
+
+https://github.com/kubernetes/ingress-nginx/blob/main/docs/examples/index.md
+
 #### service.spec.externalTrafficPolicy
 externalTrafficPolicy denotes if this Service desires to route external traffic to node-local or cluster-wide endpoints.
 * "Local" preserves the client source IP and avoids a second hop for LoadBalancer and Nodeport type services, but risks potentially imbalanced traffic spreading.
@@ -1008,9 +1013,9 @@ By setting ExternalTrafficPolicy=local, nodes only route traffic to pods that ar
 Из этого получится - единая точка входа, которая балансируется с полными возможностями metallb и openresty nginx-а.
 
 То есть при MetalLB External IP + Ingress запрос извне проходит следующую цепочку:
-1. Приходит на внешний ip-адрес MetalLB балансировщика nginx-ingress LoadBalancer Service
-1. Из балансировщика перенаправляется в nginx-ingress-controller pod
-1. Из ingress-а запрос уходит на нужный ClusterIP сервис, который указан в rules и backend-е
+1. Приходит на внешний ip-адрес MetalLB L4-балансировщика (externalTrafficPolicy: Local type:LoadBalancer)
+1. Из балансировщика перенаправляется в nginx-ingress-controller pod, с которым LB связан по лейблам
+1. Из ingress-а запрос уходит на нужный ClusterIP сервис, который указан в rules и backend-е ingress.yaml
 1. Из ClusterIP сервиса уже попадает в целевые pod-ы
 
 
@@ -1026,10 +1031,11 @@ https://iximiuz.com/en/posts/kubernetes-ephemeral-containers/
 
 ## Debugging pods!
 
+1. kubectl get (+ --watch or -w)
 1. kubectl describe
 1. kubectl get events
 1. kubectl logs
-1. kubectl exec -it <pod> -- sh
+1. kubectl exec -it <pod> -- sh (if possible)
 1. kubectl debug -n <namespace> <pod-to-debug> --image=busybox
 1. kubectl debug mypod -it --copy-to=my-debugger --image=debian --set-image=app=app:debug,sidecar=sidecar:debug (Which creates a copy of mypod adding a debug container and changing container images.)
 1. kubectl debug node/mynode -it --image=ubuntu (Debugging via a shell on the node. Don't forget to clean up it.)
@@ -1054,13 +1060,23 @@ Now copy the token and paste it into the Enter token field on the login screen.
 
 При наличии в приложении basehref ресурсы неправильно маппятся и не дают открывать сайты.
 https://github.com/kubernetes/ingress-nginx/issues/2557#issuecomment-619513010
+
+Пробовал также через аннотацию `nginx.ingress.kubernetes.io/app-root: /dashboard/` и `spec.rules.http.paths.path: /dashboard/`, но это так же привело к ошибкам в js скриптах и относительных путях css дашборда:
 ```
+# NOT WORKING!
+
+  annotations:
+    nginx.ingress.kubernetes.io/app-root: /dashboard/
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
 spec:
+  ingressClassName: nginx
   rules:
   - http:
       paths:
-      - path: /dashboard
+      - path: /dashboard/
 ```
+
 Похоже, что ингресс nginx-а не должен переписывать / и сдвигать контекст: т.е. если ингресс имеет endpoint вида
 https://ingress/dashboard/index.html, то он не может, просто убрав префикс, заммапить запрос в контейнер, в котором в location / лежит index.html и работает по урлу https://endpoint/index.html.
 
@@ -1077,3 +1093,109 @@ spec:
       paths:
       - path: /dashboard(/|$)(.*)
 ```
+
+### Kuber Dashboard context ingress
+Дашборд к тосму же LB, но к другому ingress, чтобы не заниматься кросс-неймспейс проксированием.
+Для дашборда потребовались аннотации:
+```
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+```
+**Чтобы не конфликтовать с другими сервисами** необходимо менять номер префикса запроса `rewrite-target: /$2` - т.е. на одном бэкенде $1, на другом - $2.
+
+Captured groups are saved in numbered placeholders, chronologically, in the form $1, $2 ... $n. These placeholders can be used as parameters in the rewrite-target annotation.
+
+## Deployment strategies
+* Rollout (step-by-step workloads update)
+* Canary Release (progressive traffic shifting e.g.:5%>10%>30%>100%)
+* A/B Testing (HTTP headers and cookies traffic routing)
+* Blue/Green (traffic switching)
+* Blue/Green Mirroring (traffic shadowing)
+* Canary Release with Session Affinity
+
+Важно, что A/B тестирование так и называется, так как основной упор делает на исследовании гипотез и экспериментах, не являясь стратегией деплоя как таковой. Под капотом канарейка с остановкой.
+
+То есть остальные стратегии имеют задачу развернуть новую версию приложения и ищут равновесие многих факторов, относясь больше к SRE, а A/B-тестирование больше тянет к аналитике.
+
+
+https://docs.flagger.app/usage/deployment-strategies
+## Canary Ingress и как взаимодействуют компоненты при использовании ingress и MetalLB
+Важный момент, как это всё взаимодействует в конкретном примере и в принципе.
+
+Существуют 2 deployment-а в namespace default:
+* web - 3 replicas
+* web-canary - 2 replicas
+
+Существуют для каждого из них headless ClusterIP service-ы, которые по селектору `label=web` или `label=web-canary` выбирают на какую группу подов обращаться.
+* web-svc
+* web-canary-svc
+
+Для того, чтобы сделать содержание их index.html доступным по контексту `/web/` (т.е. http://address/web/index.html) используются для каждого ingress-ы, то есть правила маршрутизации трафика извне, в данном случае, на сервисы ClusterIP.
+* web
+* web-canary
+
+Причём, ingress canary включается только при наличии в запросе header-а `canary=forsure`:
+```
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$3
+    nginx.ingress.kubernetes.io/canary: "true"
+    nginx.ingress.kubernetes.io/canary-by-header: "canary"
+    nginx.ingress.kubernetes.io/canary-by-header-value: "forsure"
+```
+
+Наконец, есть комбинация из L4-балансировщика с внешним IP, подов ингресс-контроллера, привязанных ClusterIP сервисов и конечных подов.
+
+
+Итого при MetalLB External IP + Ingress запрос извне проходит следующую цепочку:
+1. Приходит на внешний ip-адрес MetalLB L4-балансировщика (externalTrafficPolicy: Local type:LoadBalancer)
+1. Из балансировщика перенаправляется в nginx-ingress-controller pod, с которым LB связан по лейблам
+1. Из ingress-а запрос уходит на нужный ClusterIP сервис, который указан в rules и backend-е ingress.yaml
+1. Из ClusterIP сервиса уже попадает в целевые pod-ы
+
+
+
+В данном примере, все запросы, которые имеют header `x-region=us-east`, перенаправляются на поды canary, а те, которые не имеют, на предыдущие.
+```
+❯ curl -sk http://172.17.255.3/web/ | tail -n 3
+172.17.0.2	web-794d999956-r56xs</pre>
+</body>
+</html>
+
+❯ curl -sk -H "x-region: us-east" http://172.17.255.3/web/ | tail -n 3
+172.17.0.11	web-canary-5585767dc6-8nncv</pre>
+</body>
+</html>
+```
+
+### Полезные варианты работы с Canary-аннотациями
+
+Дальше, выбор ограничивается только параметрами запросов - крутой вариант использования, например по языкам или странам:
+
+```
+    nginx.ingress.kubernetes.io/canary-by-header: "Region"
+    nginx.ingress.kubernetes.io/canary-by-header-pattern: "cd|sz"
+```
+Как предлагают тут - https://intl.cloud.tencent.com/document/product/457/38413.
+
+Возможны и другие аннотации, помимо header-ов:
+https://github.com/kubernetes/ingress-nginx/blob/main/docs/user-guide/nginx-configuration/annotations.md#canary
+
+Более того самые полезные, имхо, `nginx.ingress.kubernetes.io/canary-weight: "10"`, так как они позволяют без изменения запросов просто бесшовно 10% траффика перенаправлять на выбранную группу подов.
+https://mcs.mail.ru/help/ru_RU/cases-bestpractive/k8s-canary
+https://v2-1.docs.kubesphere.io/docs/quick-start/ingress-canary/
+
+## Flagger (Flux GitOps project)
+Инструмент автоматизации развёртывания приложений в кубере  и его пример работы с canary и ингрессом:
+https://docs.flagger.app/tutorials/nginx-progressive-delivery
+
+```
+Flagger implements several deployment strategies (Canary releases, A/B testing, Blue/Green mirroring) using a service mesh (App Mesh, Istio, Linkerd, Open Service Mesh) or an ingress controller (Contour, Gloo, NGINX, Skipper, Traefik) for traffic routing. For release analysis, Flagger can query Prometheus, Datadog, New Relic, CloudWatch or Graphite and for alerting it uses Slack, MS Teams, Discord and Rocket.
+```
+
+Прекрасное описание стретегий развёртывания
+https://docs.flagger.app/usage/deployment-strategies
+
+
+
+
