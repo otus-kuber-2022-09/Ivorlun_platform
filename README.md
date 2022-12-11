@@ -580,7 +580,7 @@ Ingress и обновляет конфигурацию балансировщи�
 
 **Client** <--https--> **Proxy** <--http--> **Application**
 
-Механизм, при котором запросы снаружи до reverse-proxy идут как обычно шифрованные, но уже от reverse-proxy до приложения идут без шифрования трафика.
+Механизм, при котором запросы снаружи до reverse-proxy идут как обычно шифрованные, но уже от reverse-proxy до приложения идут без шифрования трафика. То есть шифрование "уничтожается" при достижении proxy.
 
 Это позволяет разгрузить сервер приложения и оставить эту работу reverse-proxy севрверу.
 Также, если прокся дешифрует трафик, то она начинает понимать его содержимое, а значит, может баланисровать, кешировать и тп
@@ -1196,5 +1196,337 @@ Flagger implements several deployment strategies (Canary releases, A/B testing, 
 Прекрасное описание стретегий развёртывания
 https://docs.flagger.app/usage/deployment-strategies
 
+
+
+# Homework 5 (Volumes and Persistent storage)
+## Synopsis
+Данные внутри контейнеров и подов эфемерны, поэтому, чтобы они сохранялись между перезапусками, используется механизм volume-ов, как в docker-е.
+Также часто необходимо иметь возможность 2м контейнерам обращаться к одим и тем же файлам.
+Volume-ы решают обе проблемы.
+## Volumes
+**Volume** - абстракция реального хранилища (A directory containing data, accessible to the containers in a pod)
+* Volume создается и удаляется вместе с подом
+* Один и тот же Volume может использоваться одновременно несколькими контейнерами в поде
+Далее все volumes делятся на 2 вида - volume и persistent.
+
+### subPath
+Можно один и тот же вольюм в двух контейнерах, но при этом разбивать его на поддиректории.
+Например все данные приложения для бэкапа хранить в одном вольюме, но по разным маунтпоинтам и путям:
+```
+
+      image: mysql
+      env:
+      - name: MYSQL_ROOT_PASSWORD
+        value: "rootpasswd"
+      volumeMounts:
+      - mountPath: /var/lib/mysql
+        name: site-data
+        subPath: mysql
+    - name: php
+      image: php:7.0-apache
+      volumeMounts:
+      - mountPath: /var/www/html
+        name: site-data
+        subPath: html
+```
+### Volume types
+Их целое множество - cephfs volume, azureFile CSI migration, glusterfs, iscsi, etc.
+Kubernetes supports two volumeModes of PersistentVolumes: Filesystem and Block
+#### emptyDir
+* Существует пока под запущен
+* Изначально пустой каталог на хосте
+* Все контейнеры в поде могут читать и записывать внутри файлы, причём монтирование может быть по разным путям
+* Данные могут храниться в tmpfs (чревато OOM)
+#### hostPath
+* Возможность монтировать файл или директорию с хоста
+* Часто используется для служебных сервисов
+    * Node Exporter
+    * Fluentd/Fluent Bit
+    * running cAdvisor in a container; use a hostPath of /sys
+    * running a container that needs access to Docker internals; use a hostPath of /var/lib/docker
+* Типов монтирования много:
+    * DirectoryOrCreate
+    * Directory
+    * Socket
+    * CharDevice
+    * BlockDevice
+    * FileOrCreate
+    * File
+* Кубер не рекомендует, так как очень небезопасно как с точки зрения привилегий, так и с точки зрения разницы сред
+#### downwardAPI
+##### Expose Pod Information to Containers Through Files
+There are two ways to expose Pod and Container fields to a running Container:
+* Environment variables
+* Volume Files
+
+### projected
+A projected volume maps several existing volume sources into the same directory.
+```
+  volumes:
+  - name: all-in-one
+    projected:
+      sources:
+      - secret:
+          name: mysecret
+          items:
+            - key: username
+              path: my-group/my-username
+      - downwardAPI:
+          items:
+            - path: "labels"
+              fieldRef:
+                fieldPath: metadata.labels
+            - path: "cpu_limit"
+              resourceFieldRef:
+                containerName: container-test
+                resource: limits.cpu
+```
+Together, these two ways of exposing Pod and Container fields are called the Downward API.
+### local
+PV являющийся примонтированным локальным хранилищем - директорией, разделом или диском.
+Не поддерживает динамический провижининг.
+Лучше, чем hostpath, так как не нужно явно указывать привзяку подов к ноде - система сама знает куда его назначить.
+То есть это более надёжное и гибкое решение, однако, ограниченное тем, что диск физически привязан к хосту ноды и поломка ноды означает поломку работы пода.
+
+## Out-of-tree volume plugins
+Всё это, конечно, не полный список, а с помощью  Container Storage Interface (CSI) и FlexVolume кто угодно может создавать плагины для хранилищ без необходимости менять код кубера.
+
+## Container Storage Interface (CSI)
+
+Defines a standard interface for container orchestration systems (like Kubernetes) to expose arbitrary storage systems to their container workloads.
+Once a CSI compatible volume driver is deployed on a Kubernetes cluster, users may use the csi volume type to attach or mount the volumes exposed by the CSI driver.
+
+A csi volume can be used in a Pod in three different ways:
+
+* through a reference to a PersistentVolumeClaim
+* with a generic ephemeral volume (alpha feature)
+* with a CSI ephemeral volume if the driver supports that (beta feature)
+
+## Persistent Volumes
+* Создаются на уровне кластера
+* PV похожи на обычные Volume, но имеют отдельный от сервисов жизненный цикл
+
+Но их уже нельзя просто "объявить" - нужно реализовать привязку нагрузки к PV через PVC.
+
+Отдельно, стоит выделить local volume - так как он привязывается к ноде. https://kubernetes.io/docs/concepts/storage/_print/#local
+
+## persistentVolumeClaim
+Запрос на использование какого-либо PV для POD-а.
+То есть это способ привязки без необходимости углубления в детали конкретной технологии фс и её реализации.
+
+### Claims As Volumes
+Вообще PVC это отдельный объект и может объявляться в самостоятельных манифестах, однако возможно объявление прямо в pod.spec:
+```
+spec:
+  containers:
+    - name: myfrontend
+      image: nginx
+      volumeMounts:
+      - mountPath: "/var/www/html"
+        name: mypd
+  volumes:
+    - name: mypd
+      persistentVolumeClaim:
+        claimName: myclaim
+```
+### Expanding Persistent Volumes Claims
+Поддержка авторасширения pvc доступна с 1.11 и включена по умолчанию, но работает далеко не со всеми storage class.
+You can only expand a PVC if its storage class's allowVolumeExpansion field is set to true.
+### CSI Volume expansion
+То же доступно и для CSI - должно поддерживаться целевым драйвером.
+You can only resize volumes containing a file system if the file system is XFS, Ext3, or Ext4.
+
+### PVC & PV lifecycle
+Provisioning > binding > using
+Provisioning - статический (выдали все pv заранее и pvc привязывается к существующим) и динамический (реализуется через default storage class - по запросу pvc кластер сам создаёт необходимый PV под его запрос)
+Для следующих этапов есть разные инструменты защиты от переиспользования и перезаписи.
+
+### PV Reclaiming
+PV может иметь несколько разных политик переиспользования ресурсов хранилища:
+* **Retain** - после удаления PVC, PV переходит в состояние “released”, чтобы переиспользовать ресурс, администратор должен вручную удалить PV, освободить место во внешнем хранилище (удалить данные или сделать их резервную копию)
+* **Delete** - (плагин должен поддерживать эту политику) PV удаляется вместе с PVC и высвобождается ресурс во внешнем хранилище
+* **Recycle** (deprecated в пользу dynamic provisioning-а) - удаляет все содержимое PV и делает его доступным для использования
+
+### PV Access Modes
+Тома монтируются к кластеру с помощью различных провайдеров, они имеют различные разрешения доступа чтения/записи, PV дает общие для всех провайдеров режимы.
+PV монтируется на хост с одним их трех режимов доступа:
+* **ReadWriteOnce** - **RWO** - только один узел может монтировать том для чтения и записи. ReadWriteOnce может предоставлять доступ нескольким подам, если они запущены на одной node-е.
+* **ReadOnlyMany** - **ROX** - несколько узлов могут монтировать том для чтения
+* **ReadWriteMany** - **RWX** - несколько узлов могут монтировать том для чтения и записи
+* **ReadWriteOncePod** - **RWOP** - Только для единственного pod-а в рамках всего кластера. Поддержка только для CSI k8s 1.22+
+
+### ConfigMap & Secret
+
+Надо отметить, что эти два типа ресурсов так же являются PV.
+
+**СonfigMap** - хранят:
+* конфигурацию приложений
+* значения переменных окружения отдельно от конфигурации пода
+
+**Secret** - хранят чувствительные данные (возможно шифрование содержимого в etcd, но в манифестах - base64)
+
+You can store secrets in the Kubernetes API and mount them as files for use by pods without coupling to Kubernetes directly. secret volumes are backed by tmpfs (a RAM-backed filesystem) so they are never written to non-volatile storage.
+
+Оба типа функционируют схожим образом:
+1. Сначала создаем соответствующий ресурс (ConfigMap, Secret)
+2. В конфигурации пода в описании volumes или переменных окружения ссылаемся на созданный ресурс
+
+## PVC earning lifecycle
+Стандартный путь:
+1. Создаётся StorageClass, который позволяет привязать реальное хранилище к pv
+2. Создаётся PV
+3. Создаётся PVC пользователем
+4. Кубер находит подходящий под PVC PV
+5. Создаётся POD с volume-ом, который ссылается на PVC
+
+Кстати надо будет руками потом подчищать ненужные PV - это место на всякий случай навсегда занимается.
+### В какой момент происходит монтирование
+1. Kubernetes монтирует сетевой диск на ноду
+2. Runtime пробрасывает том в контейнер
+
+## The StorageClass Resource
+Описание "классов" различных систем хранения
+Разные классы могут использоваться для:
+* Произвольных политик (например переиспользования?)
+* Динамического provisioning
+
+У каждого StorageClass есть provisioner, который определяет какой плагин используется для работы с PVs.
+
+### Provisioner
+Для того, чтобы storage class мог физически управлять выданным ему хранилищем существует Provisioner - т.е. код, который непосредственно отправляет ему вызовы.
+
+### Dynamic Volume Provisioning
+Dynamic volume provisioning allows storage volumes to be created on-demand.
+The implementation of dynamic volume provisioning is based on the API object StorageClass from the API group storage.k8s.io.
+A cluster administrator can define as many StorageClass objects as needed, each specifying a volume plugin (aka provisioner) that provisions a volume and the set of parameters to pass to that provisioner when provisioning.
+#### Resizing a volume containing a file system
+You can only resize volumes containing a file system if the file system is XFS, Ext3, or Ext4 in RWX.
+
+## StatefulSet
+PODы в StatefulSet отличаются от других нагрузок:
+* Каждый под имеет уникальное состояние (имя, сетевой адрес и volume-ы)
+* Для каждого pod-а создается отдельный PVC
+* Volume-ы для подов должны создаваться через PersistentVolume
+* Удаление/масштабирование подов не удаляет тома, связанные с ними
+
+## Local Path Provisioner
+Local Path Provisioner provides a way for the Kubernetes users to utilize the local storage in each node. Based on the user configuration, the Local Path Provisioner will create either hostPath or local based persistent volume on the node automatically. It utilizes the features introduced by Kubernetes Local Persistent Volume feature, but makes it a simpler solution than the built-in local volume feature in Kubernetes.
+
+#### Compare to built-in Local Persistent Volume feature in Kubernetes
+Pros
+
+Dynamic provisioning the volume using hostPath or local.
+
+    Currently the Kubernetes Local Volume provisioner cannot do dynamic provisioning for the local volumes.
+    Local based persistent volumes are an experimental feature (example usage).
+
+Cons
+
+    No support for the volume capacity limit currently.
+        The capacity limit will be ignored for now.
+
+
+
+Для каждого CR LocalPathProvisioner создается соответствующий StorageClass.
+
+Допустимая топология для StorageClass вычисляется на основе списка nodeGroup из CR. Топология используется при шедулинге Pod’ов.
+
+Когда Pod заказывает диск, то:
+
+    создается HostPath PV
+
+    Provisioner создает на нужном узле локальную папку по пути, состоящем из параметра path CR, имени PV и имени PVC.
+
+    Пример пути:
+
+    /opt/local-path-provisioner/pvc-d9bd3878-f710-417b-a4b3-38811aa8aac1_d8-monitoring_prometheus-main-db-prometheus-main-0
+
+Ограничения
+
+    Ограничение на размер диска не поддерживается для локальных томов.
+
+
+
+
+
+
+### Immutable Secrets
+    * protects you from accidental (or unwanted) updates that could cause applications outages
+    * improves performance of your cluster by significantly reducing load on kube-apiserver, by closing watches for secrets marked as immutable.
+
+### Risks
+  * In the API server, secret data is stored in etcd; therefore:
+    * Administrators should enable encryption at rest for cluster data (requires v1.13 or later).
+    * Administrators should limit access to etcd to admin users.
+    * Administrators may want to wipe/shred disks used by etcd when no longer in use.
+    * If running etcd in a cluster, administrators should make sure to use SSL/TLS for etcd peer-to-peer communication.
+  * If you configure the secret through a manifest (JSON or YAML) file which has the secret data encoded as base64, sharing this file or checking it in to a source repository means the secret is compromised. Base64 encoding is not an encryption method and is considered the same as plain text.
+  * Applications still need to protect the value of secret after reading it from the volume, such as not accidentally logging it or transmitting it to an untrusted party.
+  * A user who can create a Pod that uses a secret can also see the value of that secret. Even if the API server policy does not allow that user to read the Secret, the user could run a Pod which exposes the secret.
+
+
+В общем base64 - это норм, если хочется скрыть от беглого взгляда, но в идеале, лучше шифровать.
+
+
+### Kubernetes storage list
+
+На самом деле важны:
+1. Dynamic provisioning
+1. Лёгкость в обслуживании (реплики, бэкапы, восстановления и тп)
+1. kube-native установка - operator, helm, yaml
+1. POSIX FS
+1. Snapshots
+1. И другие фишки типа Thin provisioning и т.п.
+
+* https://github.com/longhorn/longhorn
+* https://github.com/rook/rook
+* https://github.com/juicedata/juicefs
+* https://github.com/cubeFS/cubefs
+
+ondat (storageos) - CSI, dynamic, operator OperatorHub.io | The registry for Kubernetes Operators, plugin
+
+quobyte - CSI, operator, dynamic
+
+seaweedfs - CSI, мелкий, но перспективный
+
+longhorn - божественно удобный тул, который ставится одним йамлом в т.ч. и в установки типа k3s, но требует на ноде драйвера sudo apt-get install -y open-iscsi
+Поддерживает ReadWriteMany, thin-provisioned,
+When the Longhorn Manager is asked to create a volume, it creates a Longhorn Engine instance on the node the volume is attached to, and it creates a replica on each node where a replica will be placed. The Longhorn Engine always runs in the same node as the Pod that uses the Longhorn volume. It synchronously replicates the volume across the multiple replicas stored on multiple nodes.
+
+rook - очень страшно ceph =), только если установка-поддержка простые, не тюнить глубоко OperatorHub.io | The registry for Kubernetes Operators
+
+beegfs - OperatorHub.io | The registry for Kubernetes Operators
+
+Drivers - Kubernetes CSI Developer Documentation
+
+GitHub - kadalu/kadalu: A lightweight Persistent storage solution for Kubernetes / OpenShift / Nomad using GlusterFS in background. (gluster)
+## Homework part
+
+### MinIO StatefulSet
+Интересно, что у pvc есть поле status, но остальные статусы отображаются аннотациями
+```
+Annotations:   pv.kubernetes.io/bind-completed: yes
+               pv.kubernetes.io/bound-by-controller: yes
+               volume.beta.kubernetes.io/storage-provisioner: rancher.io/local-path
+               volume.kubernetes.io/selected-node: kind-control-plane
+               volume.kubernetes.io/storage-provisioner: rancher.io/local-path
+Finalizers:    [kubernetes.io/pvc-protection]
+```
+
+---
+# Homework 6 (Security and RBAC)
+
+### Статья, описывающая реальные пути применения RBAC и IAM в кластере
+https://thenewstack.io/three-realistic-approaches-to-kubernetes-rbac/
+### Утилиты, позволяющие агрегировать и отобразить
+https://www.freshbrewed.science/k8s-and-krew-rbac-utilities/index.html
+
+
+
+---
+# Если нужно найти инструмент для решения какой-то проблемы
+То, в первую очередь нужно поискать его в ландшафте https://landscape.cncf.io/.
+
+Там есть всё, начиная с CNI/CRI/CSI и Service Mesh, заканчивая SAST-ами и Chaos Engineering-ом.
 
 
