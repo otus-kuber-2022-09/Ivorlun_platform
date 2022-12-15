@@ -1200,6 +1200,24 @@ https://docs.flagger.app/usage/deployment-strategies
 
 # Homework 5 (Volumes and Persistent storage)
 ## Synopsis
+
+Тема огромна - проще прочитать документацию https://kubernetes.io/docs/concepts/storage/.
+
+Чтобы напомнить про сущности, отмечу, что она содержит следующие пункты:
+* Volumes
+* Persistent Volumes
+* Projected Volumes
+* Ephemeral Volumes
+* Storage Classes
+* Dynamic Volume Provisioning
+* Volume Snapshots
+* Volume Snapshot Classes
+* CSI Volume Cloning
+* Storage Capacity
+* Node-specific Volume Limits
+* Volume Health Monitoring
+* Windows Storage
+
 Volume-ы (почти как в docker-е) нужны для 2х вещей:
 1. Чтобы сохранять данные pod-а при рестарте контейнеров в нём. Так как по умолчанию перезапуск происходит начисто.
 2. Чтобы контейнеры внутри pod-а могли совместно использовать файлы
@@ -1208,29 +1226,29 @@ Volume-ы (почти как в docker-е) нужны для 2х вещей:
 **Volume** - абстракция реального хранилища (A directory containing data, accessible to the containers in a pod)
 * Volume создается и удаляется вместе с подом (не экземпляром, а ресурсом)
 * Один и тот же Volume может использоваться одновременно несколькими контейнерами в поде
-Далее все volumes делятся на 2 вида - volume и persistent.
+Далее все volumes делятся на 2 вида - volume и persistent volume.
 
 ### Volume types
+
+Их очень много, некоторые:
+
 * Volumes (just a volumes)
-* Projected - A projected volume maps several existing volume sources into the same directory.
-* Ephemeral (common volumes) -
-* Persistent (persistent volumes) -
+* Projected - A projected (проецируемые) volume maps several existing volume sources into the same directory. То есть одна директория вольюм маунта содержит несколько вольюмов-источников разных типов конфигов (secret, downwardAPI, configMap, serviceAccountToken)
+* Ephemeral - не сохраняются при перезапуске контейнеров. Нужны для доп места, чаще под кеш. Может быть многих базовых типов: emptyDir, все volume-ы конфигов, CSI и тп.
+* ConfigMap
+* Secret
+* Persistent (persistent volumes) - самые ходовые для данных.
 
-Types of ephemeral volumes
+#### emptyDir (Common Volume type)
+Просто пустая директория на хосте ноды, где вызывается.
 
-Kubernetes supports several different kinds of ephemeral volumes for different purposes:
-
-    emptyDir: empty at Pod startup, with storage coming locally from the kubelet base directory (usually the root disk) or RAM
-    configMap, downwardAPI, secret: inject different kinds of Kubernetes data into a Pod
-    CSI ephemeral volumes: similar to the previous volume kinds, but provided by special CSI drivers which specifically support this feature
-    generic ephemeral volumes, which can be provided by all storage drivers that also support persistent volumes
-
-#### emptyDir
 * Существует пока под запущен
 * Изначально создаётся пустой каталог на хосте (Директория типа /var/lib/kubelet/pods/<hash>/volumes)
 * Все контейнеры в поде могут читать и записывать внутри файлы, причём монтирование может быть по разным путям
 * Данные могут храниться в tmpfs (чревато OOM, зато очень быстро)
-#### hostPath
+#### hostPath (Common Volume type)
+Существующая директория на хосте ноды, где вызывается.
+
 * Возможность монтировать файл или директорию с хоста
 * Часто используется для служебных сервисов
     * Node Exporter
@@ -1247,6 +1265,8 @@ Kubernetes supports several different kinds of ephemeral volumes for different p
     * FileOrCreate
     * File
 * Кубер не рекомендует, так как очень небезопасно как с точки зрения привилегий, так и с точки зрения разницы сред
+* На его основе делают persistent Volume provisioner - https://github.com/rancher/local-path-provisioner
+
 ### subPath
 Можно использовать один и тот же вольюм в двух контейнерах, но при этом разбивать его на поддиректории.
 Например все данные приложения для бэкапа хранить в одном вольюме, но по разным маунтпоинтам и путям:
@@ -1292,12 +1312,14 @@ Pod перезапускается - данные не сохраняются.
 * Постоянная память в качестве замены оперативной памяти для memcached
 * Локальное хранилище LVM в качестве рабочего пространства
 * Можно создавать предзаполненный volume или CSI клон или копию
+
 #### downwardAPI
 ##### Expose Pod Information to Containers Through Files
 There are two ways to expose Pod and Container fields to a running Container:
 * Environment variables
 * Volume Files
 Together, these two ways of exposing Pod and Container fields are called the Downward API.
+
 ### Projected volume
 A projected (запланированный или спроецированный?) volume maps several existing volume sources into the same directory.
 
@@ -1345,18 +1367,34 @@ spec:
             - key: config
               path: my-group/my-config
 ```
-### local
+---
+### local (Persistent Local Volume)
 PV являющийся примонтированным локальным хранилищем - директорией, разделом или диском.
+
 Не поддерживает динамический провижининг.
+
 Лучше, чем hostpath, так как не нужно явно указывать привзяку подов к ноде - система сама знает куда его назначить.
+
 То есть это более надёжное и гибкое решение, однако, ограниченное тем, что диск физически привязан к хосту ноды и поломка ноды означает поломку работы пода.
 
 ## Out-of-tree volume plugins
 Всё это, конечно, не полный список, а с помощью  Container Storage Interface (CSI) и FlexVolume кто угодно может создавать плагины для хранилищ без необходимости менять код кубера.
 
+## The StorageClass Resource
+По факту yaml, похожий на CRD, который просто регистрирует ваше имя класса, связанный с ним плагин провижинера и поля класса, которые могут использовать pod-ы при вызове PVC с этим storage-классом.
+
+Причём и ключи и допустимые значения этих полей мы задаём сами, естесственно.
+Например: class:nfs + drive_type:slow
+
+### Provisioner
+Имя storage plugin-а, который по факту будет выполнять операции с дисками, который привязан к storage class-у.
+
+Есть список встроенных плагинов, но его можно расширять: https://kubernetes.io/docs/concepts/storage/storage-classes/#provisioner
+
 ## Container Storage Interface (CSI)
 
 Defines a standard interface for container orchestration systems (like Kubernetes) to expose arbitrary storage systems to their container workloads.
+
 Once a CSI compatible volume driver is deployed on a Kubernetes cluster, users may use the csi volume type to attach or mount the volumes exposed by the CSI driver.
 
 A csi volume can be used in a Pod in three different ways:
@@ -1399,14 +1437,18 @@ spec:
 ```
 ### Expanding Persistent Volumes Claims
 Поддержка авторасширения pvc доступна с 1.11 и включена по умолчанию, но работает далеко не со всеми storage class.
+
 You can only expand a PVC if its storage class's allowVolumeExpansion field is set to true.
 ### CSI Volume expansion
 То же доступно и для CSI - должно поддерживаться целевым драйвером.
+
 You can only resize volumes containing a file system if the file system is XFS, Ext3, or Ext4.
 
 ### PVC & PV lifecycle
 Provisioning > binding > using
-Provisioning - статический (выдали все pv заранее и pvc привязывается к существующим) и динамический (реализуется через default storage class - по запросу pvc кластер сам создаёт необходимый PV под его запрос)
+
+Provisioning - статический (выдали все pv заранее и pvc привязывается к существующим) и динамический (реализуется через default storage class - происходит запрос pvc и кластер сам создаёт необходимый PV под его запрос, после чего происходит привязка)
+
 Для следующих этапов есть разные инструменты защиты от переиспользования и перезаписи.
 
 ### PV Reclaiming
@@ -1425,13 +1467,14 @@ PV монтируется на хост с одним их трех режимо
 
 ### ConfigMap & Secret
 
-Надо отметить, что эти два типа ресурсов так же являются PV.
+Надо отметить, что эти два типа ресурсов так же в основном являются PV, но могут использоваться и в виде переменных.
 
-**СonfigMap** - хранят:
+#### **СonfigMap** - хранят:
 * конфигурацию приложений
 * значения переменных окружения отдельно от конфигурации пода
+* Не шифруются, поэтому для любых приватных данных нужно использовать secret
 
-**Secret** - хранят чувствительные данные (возможно шифрование содержимого в etcd, но в манифестах - base64)
+#### **Secret** - хранят чувствительные данные (возможно шифрование содержимого в etcd, но в манифестах - base64)
 
 You can store secrets in the Kubernetes API and mount them as files for use by pods without coupling to Kubernetes directly. secret volumes are backed by tmpfs (a RAM-backed filesystem) so they are never written to non-volatile storage.
 
@@ -1439,11 +1482,45 @@ You can store secrets in the Kubernetes API and mount them as files for use by p
 1. Сначала создаем соответствующий ресурс (ConfigMap, Secret)
 2. В конфигурации пода в описании volumes или переменных окружения ссылаемся на созданный ресурс
 
+## ConfigMaps
+Нужны, очевидно, чтобы отделять данные от приложения, что полезно для безоапсности и переносимости.
+
+A ConfigMap is an API object used to store non-confidential data in key-value pairs. Pods can consume ConfigMaps as **environment variables, command-line arguments, or as configuration files in a volume**. In addition thereis a crazy way to write code to run inside the Pod that uses the Kubernetes API to read a ConfigMap.
+
+The name of a ConfigMap must be a valid DNS subdomain name.
+
+Mounted ConfigMaps are updated automatically.
+ConfigMaps consumed as environment variables are not updated automatically and require a pod restart.
+
+**Caution**: ConfigMap does not provide secrecy or encryption. If the data you want to store are confidential, use a Secret rather than a ConfigMap, or use additional (third party) tools to keep your data private.
+
+A ConfigMap is not designed to hold large chunks of data. The data stored in a ConfigMap cannot exceed 1 MiB. If you need to store settings that are larger than this limit, you may want to consider mounting a volume or use a separate database or file service.
+
+Unlike most Kubernetes objects that have a spec, a ConfigMap has data and binaryData fields. The data field is designed to contain UTF-8 strings while the binaryData field is designed to contain binary data as base64-encoded strings.
+
+Immutable Secrets and Immutable ConfigMaps - имеют смысл, когда конфигов очень много: защищены от записи и отключают автоматическое слежение за их обновлениями.
+
 ## Secret
+
+A Secret is an object that contains a small amount of sensitive data such as a password, a token, or a key.
+
+The name of a Secret object must be a valid DNS subdomain name.
+
+Так же как и ConfigMap-ы:
+1. Ограничены размером в мегабайт
+2. Чаще volume-s, реже - переменные среды для пода.
+
+Kubernetes Secrets are, by default, **stored unencrypted** in the API server's underlying data store (etcd)! In order to safely use Secrets, take at least the following steps - https://kubernetes.io/docs/concepts/security/secrets-good-practices/
 
 Данные для секретов записываются в 2х форматах - `data` и `stringData`.
 data - base64 encoded.
 
+There are 3 main ways for a Pod to use a Secret:
+* As files in a volume mounted on one or more of its containers.
+* As container environment variable.
+* By the kubelet when pulling images for the Pod.
+
+Opaque - непрозрачный, матовый, мрак
 
 | Builtin Type | Usage |
 | --- | --- |
@@ -1462,6 +1539,36 @@ Secrets могут быть примонтированы как data volumes и�
     * protects you from accidental (or unwanted) updates that could cause applications outages
     * improves performance of your cluster by significantly reducing load on kube-apiserver, by closing watches for secrets marked as immutable.
 
+### Projection of Secret keys to specific paths
+
+Крутая опция, позволяющая выбирать из всех ключей сикрета только определённые и маппить их по разным путям.
+
+You can also control the paths within the volume where Secret keys are projected. You can use the .spec.volumes[].secret.items field to change the target path of each key:
+```
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mypod
+spec:
+  containers:
+  - name: mypod
+    image: redis
+    volumeMounts:
+    - name: foo
+      mountPath: "/etc/foo"
+      readOnly: true
+  volumes:
+  - name: foo
+    secret:
+      secretName: mysecret
+      items:
+      - key: username
+        path: my-group/my-username
+```
+What will happen:
+1. the username key from mysecret is available to the container at the path /etc/foo/my-group/my-username instead of at /etc/foo/username.
+1. the password key from that Secret object is not projected.
+
 ### Risks
   * In the API server, secret data is stored in etcd; therefore:
     * Administrators should enable encryption at rest for cluster data (requires v1.13 or later).
@@ -1473,7 +1580,10 @@ Secrets могут быть примонтированы как data volumes и�
   * A user who can create a Pod that uses a secret can also see the value of that secret. Even if the API server policy does not allow that user to read the Secret, the user could run a Pod which exposes the secret.
 
 
-В общем base64 - это норм, если хочется скрыть от беглого взгляда, но в идеале, лучше шифровать.
+В общем base64 - это прокатит, если хочется скрыть от беглого взгляда, но лучше шифровать.
+
+#### Container image pull secrets (private image repo access)
+If you want to fetch container images from a private repository, you need a way for the kubelet on each node to authenticate to that repository. You can configure image pull secrets to make this possible. These secrets are configured at the Pod level.
 
 ## PVC earning lifecycle
 Стандартный путь:
@@ -1499,10 +1609,15 @@ Secrets могут быть примонтированы как data volumes и�
 ### Provisioner
 Для того, чтобы storage class мог физически управлять выданным ему хранилищем существует Provisioner - т.е. код, который непосредственно отправляет ему вызовы.
 
-### Dynamic Volume Provisioning
+## Dynamic Volume Provisioning
 Dynamic volume provisioning allows storage volumes to be created on-demand.
 The implementation of dynamic volume provisioning is based on the API object StorageClass from the API group storage.k8s.io.
 A cluster administrator can define as many StorageClass objects as needed, each specifying a volume plugin (aka provisioner) that provisions a volume and the set of parameters to pass to that provisioner when provisioning.
+
+Важно, что после удаления statefulset-а PVC и PV остались в кластере, пока не удалил PVC руками. Тогда уже и связанный PV удалился, так как был с reclaim политикой Delete:
+
+
+
 #### Resizing a volume containing a file system
 You can only resize volumes containing a file system if the file system is XFS, Ext3, or Ext4 in RWX.
 
@@ -1541,7 +1656,7 @@ Local Path Provisioner provides a way for the Kubernetes users to utilize the lo
 В общем base64 - это норм, если хочется скрыть от беглого взгляда, но в идеале, лучше шифровать.
 
 
-### Kubernetes storage list
+### Kubernetes some CSI list
 
 https://github.com/kubernetes-csi/docs/blob/master/book/src/drivers.md
 
@@ -1549,14 +1664,14 @@ https://github.com/kubernetes-csi/docs/blob/master/book/src/drivers.md
 1. Dynamic provisioning
 1. Лёгкость в обслуживании (реплики, бэкапы, восстановления и тп)
 1. kube-native установка - operator, helm, yaml
-1. POSIX FS
+1. POSIX FS (ну когда как)
 1. Snapshots
 1. И другие фишки типа Thin provisioning и т.п.
 
-* https://github.com/longhorn/longhorn - божественно удобный тул, который ставится одним йамлом в т.ч. и в установки типа k3s, но требует на ноде драйвера sudo apt-get install -y open-iscsi
-Поддерживает ReadWriteMany, thin-provisioned,
+* https://github.com/longhorn/longhorn - божественно удобный тул, который ставится одним йамлом в т.ч. и даже в установки типа k3s, но требует на ноде драйвера sudo apt-get install -y open-iscsi
+Поддерживает ReadWriteMany, thin-provisioned и тп.
 When the Longhorn Manager is asked to create a volume, it creates a Longhorn Engine instance on the node the volume is attached to, and it creates a replica on each node where a replica will be placed. The Longhorn Engine always runs in the same node as the Pod that uses the Longhorn volume. It synchronously replicates the volume across the multiple replicas stored on multiple nodes.
-* https://github.com/rook/rook - очень страшно ceph =), только если установка-поддержка простые, не тюнить глубоко OperatorHub.io | The registry for Kubernetes Operators
+* https://github.com/rook/rook - очень страшно тк ceph =), только если установка-поддержка простые, не тюнить глубоко
 * https://github.com/seaweedfs/seaweedfs - CSI, мелкий, но перспективный
 * https://github.com/kadalu/kadalu: A lightweight Persistent storage solution for Kubernetes / OpenShift / Nomad using GlusterFS in background.
 * https://github.com/juicedata/juicefs - требует первоначальной настройки внешнего кластера
@@ -1576,6 +1691,62 @@ Annotations:   pv.kubernetes.io/bind-completed: yes
                volume.kubernetes.io/storage-provisioner: rancher.io/local-path
 Finalizers:    [kubernetes.io/pvc-protection]
 ```
+
+Важный момент, что **сначала создаётся PVC, а затем создаётся PV под него в случае динамического провижининга**. При этом сначала даже образ контейнеров пода не пуллится - будет ждать пока либо админ либо провижинер не создадут PV для привязки.
+
+```
+❯ k get ev
+LAST SEEN   TYPE     REASON                  OBJECT                               MESSAGE
+5m21s       Normal   WaitForFirstConsumer    persistentvolumeclaim/data-minio-0   waiting for first consumer to be created before binding
+5m21s       Normal   ExternalProvisioning    persistentvolumeclaim/data-minio-0   waiting for a volume to be created, either by external provisioner "rancher.io/local-path" or manually created by system administrator
+5m21s       Normal   Provisioning            persistentvolumeclaim/data-minio-0   External provisioner is provisioning volume for claim "default/data-minio-0"
+5m19s       Normal   ProvisioningSucceeded   persistentvolumeclaim/data-minio-0   Successfully provisioned volume pvc-f3a65b28-a1ba-4b83-a109-22326015c61f
+5m18s       Normal   Scheduled               pod/minio-0                          Successfully assigned default/minio-0 to kind-control-plane
+5m17s       Normal   Pulling                 pod/minio-0                          Pulling image "minio/minio:RELEASE.2019-07-10T00-34-56Z"
+3m26s       Normal   Pulled                  pod/minio-0                          Successfully pulled image "minio/minio:RELEASE.2019-07-10T00-34-56Z" in 1m51.278097132s
+3m26s       Normal   Created                 pod/minio-0                          Created container minio
+3m26s       Normal   Started                 pod/minio-0                          Started container minio
+5m21s       Normal   SuccessfulCreate        statefulset/minio                    create Claim data-minio-0 Pod minio-0 in StatefulSet minio success
+5m21s       Normal   SuccessfulCreate        statefulset/minio                    create Pod minio-0 in StatefulSet minio successful
+```
+В ДЗ предлагают использовать для просмотра mc, но есть ui, в котором можно работать с бакетами по 9000 порту. Забавно, что он показывает использованное пространство для всего сегмента фс, а не для pvc в 10 гигабайт, который ему по идее должен быть выдан.
+
+
+То есть порядок действий следующий:
+* Создаётся statefulset с MinIO, у которого есть просто volume, в котором он будет хранить данные
+* Вместе с ним создаётся RWO volumeClaim, который запрашивает у дефолтного storage class квоту на pv со storageClass=standard и volumeMode=filesystem, т.е. дефолтные значения
+* А всё потому что в kind-е по умолчанию установлен rancher/local-path-provisioner в одноимённом ns.
+То есть он выдаёт на каждый PVC PV, выделяя целиком (тк лимиты пока игнорирует) `hostPath` диск динамически - очень удобная штука в случае использованя bare-metal и отсутствия network storage.
+
+При этом, если удалить statefulSet, то и pv и pvc останутся, пока pvc не будет удалён вручную.
+
+Примечательно, что директория, в которой находятся загруженные в бакет файлы, находится буквально за 2 команды:
+```
+❯ k describe pv | grep Path
+    Type:          HostPath (bare host directory volume)
+    Path:          /var/local-path-provisioner/pvc-51dd3f17-f33b-4ac4-a959-9d77e6d7368d_default_data-minio-0
+    HostPathType:  DirectoryOrCreate
+```
+и переходя в контейнер kind-а и поддиректорию бакета, который создал из ui:
+```
+root@kind-control-plane:~# ls -lhF /var/local-path-provisioner/pvc-51dd3f17-f33b-4ac4-a959-9d77e6d7368d_default_data-minio-0/bucket/
+total 16M
+-rw-r--r-- 1 root root 16M Dec 15 17:35 Kubernetes_in_Action_Second_Edition_v14.pdf
+```
+### Secret creation
+В нашем случае секретами являются MINIO_ACCESS_KEY и MINIO_SECRET_KEY, которые подтягиваются в приложение как переменные среды, поэтому проще всего поступить так:
+1. **Так как секреты хранятся в base64, используем** `echo -n <var_name> | base64`
+1. Создаём секрет типа opaque, в который кладём эти закодированные переменные
+1. В поде меняем значение на переменную из ключа секрета:
+```
+env:
+  - name: MINIO_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: minio-secret
+        key: MINIO_ACCESS_KEY
+```
+
 
 ---
 # Homework 6 (Security and RBAC)
@@ -1714,6 +1885,17 @@ Some Kubernetes features exclusively use cgroup v2 for enhanced resource managem
 
 То есть только в v2 cgroup используются и limit и request-ы на память, так как в v1 использовались только limit-ы по факту. И в v1 не было механизма сжатия памяти, в случае, если оно подбиралась к лимиту, что приводило к OOM-ам. (https://kubernetes.io/blog/2021/11/26/qos-memory-resources/)
 
+
+### Config best practice
+Интересный хинт написан тут - https://kubernetes.io/docs/concepts/configuration/overview/#services.
+
+Сказано, что первым лучше создавать сервисы для любого типа workload-а, так как в таком случае при инициализации они сразу подхватят нужные переменные и не будет задержек и race-ов.
+
+Полагаю, что то же самое касается и сикретов с конфиг мапами - они при бутстраппинге будут прокинуты и приложение запустится быстрее и без проблем.
+
+Так что общее правило - сначала всё подготовить для основного объекта, а только потом задеплоить его.
+
+Вообще полезная страница, по ней можно делать финальную сверку своих конфигураций.
 
 # Глоссарий Kubernetes-а
 https://kubernetes.io/docs/reference/glossary/?all=true

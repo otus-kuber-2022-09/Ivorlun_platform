@@ -1,3 +1,12 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-secret
+type: Opaque
+data:
+  MINIO_ACCESS_KEY: bWluaW8=
+  MINIO_SECRET_KEY: bWluaW8xMjM=
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -17,14 +26,22 @@ spec:
       containers:
       - name: minio
         env:
-        - name: MINIO_ACCESS_KEY
-          value: "minio"
-        - name: MINIO_SECRET_KEY
-          value: "minio123"
+          - name: MINIO_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-secret
+                key: MINIO_ACCESS_KEY
+                optional: false # same as default
+          - name: MINIO_SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-secret
+                key: MINIO_SECRET_KEY
+                optional: false # same as default
         image: minio/minio:RELEASE.2019-07-10T00-34-56Z
         args:
         - server
-        - /data 
+        - /data
         ports:
         - containerPort: 9000
         # These volume mounts are persistent. Each pod in the PetSet
@@ -42,7 +59,7 @@ spec:
           initialDelaySeconds: 120
           periodSeconds: 20
   # These are converted to volume claims by the controller
-  # and mounted at the paths mentioned above. 
+  # and mounted at the paths mentioned above.
   volumeClaimTemplates:
   - metadata:
       name: data
