@@ -2141,6 +2141,236 @@ selfsubjectrulesreviews.authorization.k8s.io                        ✔
 ---
 # Homework 7 (Helm and templating)
 
+## Helm  
+Возможности  
+* Упаковка нескольких манифестов Kubernetes в пакет - Chart
+* Установка пакета в Kubernetes (установленный Chart называется Release)
+* Изменение значений переменных во время установки пакета
+* Upgrade (обновления) и Rollback (откаты) установленных пакетов
+* Управление зависимостями между пакетами
+* Xранение пакетов в удаленных репозиториях
+
+```
+example/ 
+  Chart.yaml         # описание пакета 
+  README.md 
+  requirements.yaml  # список зависимостей 
+  values.yaml        # переменные
+  charts/            # загруженные зависимости 
+  templates/         # шаблоны описания ресурсов Kubernetes
+```
+### Встрооенные переменные
+
+* Release - информация об устанавливаемом release
+* Chart - информация о chart, из которого происходит установка
+* Files - возможность загружать в шаблон данные из файлов (например, в configMap )
+* Capabilities - информация о возможностях кластера (например, версия Kubernetes)
+* Templates - информация о манифесте, из которого был создан ресурс
+
+### Использование публичных чартов, но своих переменных  
+`helm install chartmuseum chartmuseum/chartmuseum -f kubernetes-templating/chartmuseum/values.yaml --namespace=chartmuseum --create-namespace`
+### Циклы, условия и функции
+В основе Helm лежит шаблонизатор Go с 50+ встроенными функциями.  
+
+Например:  
+**Условия**:
+``` 
+{{- if .Values.server.persistentVolume.enabled }} 
+    persistentVolumeClaim: 
+      ... 
+{{- else }}
+```
+**Циклы**:
+```
+{{- range $key, $value := .Values.server.annotations }} 
+  {{ $key: }} {{ $value }} 
+{{- end }}
+```
+### Hooks
+Определенные действия, выполняемые в различные моменты жизненного цикла поставки. Hook, как правило, запускает Job (но это не обязательно).
+
+Виды hooks:
+* `pre/post-install`
+* `pre/post-delete`
+* `pre/post-upgrade`
+* `pre/post-rollback`
+
+### Helm Secrets
+Плагин helm-secrets предлагает секретное управление и защиту вашей важной информации. Он делегирует секретное шифрование Mozilla SOPS
+
+* Плагин для Helm
+* Механизм удобного* хранения и деплоя секретов для тех, у кого нет HashiCorp Vault
+* Реализован поверх другого решения - Mozilla Sops
+* Возможность сохранить структуру зашифрованного файла (YAML, JSON)
+* Поддержка PGP и KMS (AWS, GCP)
+
+### Best practices  
+* В большинстве имён и переменных стоит привязываться не к названию пакета, а к версии релиза
+* Указывайте все используемые в шаблонах переменные в values.yaml, выбирайте адекватные значения по умолчанию
+* Используйте команду helm create для генерации структуры своего chart
+* Пользуйтесь плагином helm docs для документирования своего chart
+
+https://helm.sh/docs/chart_best_practices/
+
+#### Chart, release and some valuable remarks
+**Chart** - пакет, включающий
+* Метаданные
+* Шаблоны описания ресурсов Kubernetes
+* Конфигурация установки (values.yaml)
+* Документация
+* Список зависимостей
+
+**Release**
+* Установленный в Kubernetes Chart
+* Хранятся в configMaps и Secrets
+* Chart + Values = Release
+* 1 Upgrade = 1 Release
+
+A chart can be either an 'application' or a 'library' chart.
+* Application charts are a collection of templates that can be packaged into versioned archives to be deployed.
+* Library charts provide useful utilities or functions for the chart developer. They're included as a dependency of application charts to inject those utilities and functions into the rendering pipeline. Library charts do not define any templates and therefore cannot be deployed.
+
+Для того, чтобы переопределить values для subchart-а необходимо в основном файле values прописать секцию с именем зависимости и в ней переопределить значения.
+
+У чарта могут быть тесты - например connection test после установки.  
+А так же постинсталл инфа формируется через NOTES.txt
+
+**“.”** означает текущую область значений (current scope), далее идет зарезервированное слово Values и путь до ключа. При рендере релиза сюда подставится значение, которое было определено по этому пути.
+### 3-way merge
+Работает Helm 3 следующим образом:
+
+1. **1** Получает на вход Chart (локально или из репозитория, при этом чарты могут использовать друг друга) и генерирует манифест релиза.
+1. **2** Получает текст предыдущего релиза.
+1. **3** Получает текущее стостояние примитивов из namespace-релиза.
+1. Сравнивает эти три вещи, делает patch и передает его в KubeAPI.
+1. Дожидается выката релиза (опциональный шаг).
+
+Эта схема называется 3-way merge. Таким образом Helm приведет конфигурацию приложения к состоянию, которое описано в git, но не тронет другие изменения. Т. е., если у вас в кластере есть какая-то сущность, которая трансформирует ваши примитивы (например, Service Mesh), то Helm отнесется к ним бережно.
+
+##### Следующая аннотация позволяет развертывать новые развертывания (Deployments) при изменении ConfigMap:
+```
+kind: Deployment
+spec:
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+```
+##### Отказ от удаления ресурсов с помощью политик ресурсов (PVC for example):
+```
+metadata:
+  annotations:
+    "helm.sh/resource-policy": keep
+```
+
+## Helmfile  
+* Надстройка над helm - шаблонизатор шаблонизатора.  
+* Управление развертыванием нескольких Helm Charts на нескольких окружениях
+* Возможность устанавливать Helm Charts в необходимом порядке
+* Больше шаблонизации, в том числе и в values.yaml
+* Поддержка различных плагинов (helm-tiller, helm-secret, helm-diﬀ)
+* Главное - не увлечься шаблонизацией и сохранять прозрачность решения
+```
+releases:
+- name: prometheus-operator
+  chart: stable/prometheus-operator
+  version: 6.11.0
+  <<: *template
+- name: prometheus-telegram-bot
+  chart: express42/prometheus-telegram-bot
+  version: 0.0.1
+  <<: *template
+...
+    - ./values/{{`{{ .Release.Name }}`}}.yaml.gotmpl
+```
+## Jsonnet
+
+* Продукт от Google
+* Расширение JSON (как YAML - нужно помнить, что любой json представим в виде yaml)
+* Любой валидный JSON - валидный Jsonnet (как YAML)
+* Полноценный язык программирования* (заточенный под шаблонизацию) (не как YAML)
+
+### Зачем (в большинстве - незачем)
+
+* Для генерации и применения манифестов множества однотипных ресурсов, отличающихся несколькими параметрами
+* Если есть ненависть к YAML, многострочным портянкам на YAML и отступам в YAML
+* Для генерации YAML и передачи его в другие утилиты (например - kubectl):
+* `kubecfg show workers.jsonnet | kubectl apply -f -`
+
+### Kubecfg  
+Самый лучший на данный момент тул для работы с Jsonnet-ом  
+Общий workﬂow следующий: 
+1. Импортируем подготовленную библиотеку с описанием ресурсов
+1. Пишем общий для сервисов шаблон
+1. Наследуемся от шаблона, указывая конкретные параметры
+
+## Kustomize
+
+* Поддержка встроена в kubectl
+* Кастомизация готовых манифестов
+* Все больше приложений начинают использовать kustomize как альтернативный вариант поставки (istio, nginx-ingress, etc...)
+* Почти как Jsonnet, только YAML (но kustomize - это не templating)
+* Нет параметризации при вызове, но можно делать так: `kustomize edit set image ...`
+
+### Общая логика работы:
+1. Создаем базовые манифесты ресурсов
+1. Создаем файл kustomization.yaml с описанием общих значений
+1. Кастомизируем манифесты и применяем их (Можно делать как на лету, так и по очереди)
+1. Отлично подходит для labels , environment variables и много чего еще
+
+## cert-manager  
+Интересный инструмент, позволяющий автоматизировать работу с сертификатами.  
+Причём провайдерами могут выступать как Let’s Encrypt, HashiCorp Vault и Venafi, так и private PKI.  
+
+Туториал для LetsEncrypt + Ingress-Nginx https://cert-manager.io/docs/tutorials/acme/nginx-ingress/
+
+Для отладки используется великолепное приложение kuard, которое позволяет получить исчёрпывающую инфу о кластере и работе сети - https://github.com/kubernetes-up-and-running/kuard
+
+Для того, чтобы с помощью let's encrypt-а можно было получить сертификат, нужно выполнить следующее:  
+
+1. Иметь в кластере ingress-контроллер (простейший пример - helm nginx)
+2. Установить в кластер сам cert-manager
+3. Иметь публичное (доступное для LE) доменное имя или зону, которая будет подтверждать сертификат - пришлось в GCP зарегать google domains
+4. Создать ingress для целевого сервиса, в котором будут аннотации на эмитента сертификата и блок с секретом tls:  
+
+```
+  annotations:
+    kubernetes.io/ingress.class: "nginx"    
+    #cert-manager.io/issuer: "letsencrypt-staging"
+spec:
+  tls:
+  - hosts:
+    - example.example.com
+    secretName: quickstart-example-tls
+```
+5. Дальше работа идёт с 2мя видами эмитентов LE - staging и prod, потому что можно легко выйти за лимиты попыток подтверждения сертификатов у LE и нужно сначала протестировать корректность всей связки.  
+
+Создаётся 
+```
+   apiVersion: cert-manager.io/v1
+   kind: Issuer
+   metadata:
+     name: letsencrypt-prod
+```
+через который на ингресс и делается фактический запрос у LE.  
+
+6. Deploy a TLS Ingress Resource
+
+Если выполнены все требования, то можно делать запрос на TLS сертификат.  
+Для этого существуют 2 способа:  
+1. Аннотации в ingress через ingress-shim
+2. Прямое создание ресурса сертификата  
+
+Проще первый путь, так как простое раскомментирование строки `#cert-manager.io/issuer: "letsencrypt-staging"` позволяет cert-manager
+* Создать автоматом сертификат
+* Создаст или изменит ingress чтобы использовать его для подтверждения домена (что обычно в html/.well-known/token.html)
+* Подтвердить домен
+* После того как домен подтверждён и выдан, cert-manager создаст и/или обновит секрет в сертификате
+
+Проверяем состояние выдачи `kubectl describe certificate quickstart-example-tls` и сам секрет серта `kubectl describe secret quickstart-example-tls`  
+
+## Homework part
+
 
 ---
 
