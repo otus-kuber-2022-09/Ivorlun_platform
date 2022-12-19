@@ -99,6 +99,22 @@ If a Pod's init container fails, the kubelet repeatedly restarts that init conta
               command: [ "/bin/bash", "-c", "sleep 5; kill -QUIT 1" ]
 ```
 
+### Resource units in Kubernetes
+Note: If you specify a limit for a resource, but do not specify any request, and no admission-time mechanism has applied a default request for that resource, then Kubernetes copies the limit you specified and uses it as the requested value for the resource.
+
+There are limits also for PID count for POD to consume, storage and so on - https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/.
+#### CPU resource units
+
+Limits and requests for CPU resources are measured in cpu units. In Kubernetes, 1 CPU unit is equivalent to 1 physical CPU core, or 1 virtual core, depending on whether the node is a physical host or a virtual machine running inside a physical machine.
+
+Fractional requests are allowed. When you define a container with spec.containers[].resources.requests.cpu set to 0.5, you are requesting half as much CPU time compared to if you asked for 1.0 CPU. For CPU resource units, the quantity expression 0.1 is equivalent to the expression 100m, which can be read as "one hundred millicpu". Some people say "one hundred millicores", and this is understood to mean the same thing.
+
+#### Memory resource units
+
+Limits and requests for memory are measured in bytes. You can express memory as a plain integer or as a fixed-point number using one of these quantity suffixes: E, P, T, G, M, k. You can also use the power-of-two equivalents: Ei, Pi, Ti, Gi, Mi, Ki. For example, the following represent roughly the same value: `128974848, 129e6, 129M,  128974848000m, 123Mi`
+
+Pay attention to the case of the suffixes. If you request 400m of memory, this is a request for 0.4 bytes. Someone who types that probably meant to ask for 400 mebibytes (400Mi) or 400 megabytes (400M).
+
 ## Задание. Почему обновление ReplicaSet не повлекло обновление запущенных pod?
 
 В нашем случае, replicaset controller следит за тем, чтобы pod-ов, которые попадают в область ответственности контроллера по label-ам, было указанное количество. При этом изменение информации в самих подах не входит в его зону ответственности. А так как подов уже было 3 и их количество не изменилось, то контроллер не предпринял никаких действий.
@@ -2141,8 +2157,8 @@ selfsubjectrulesreviews.authorization.k8s.io                        ✔
 ---
 # Homework 7 (Helm and templating)
 
-## Helm  
-Возможности  
+## Helm
+Возможности
 * Упаковка нескольких манифестов Kubernetes в пакет - Chart
 * Установка пакета в Kubernetes (установленный Chart называется Release)
 * Изменение значений переменных во время установки пакета
@@ -2151,12 +2167,12 @@ selfsubjectrulesreviews.authorization.k8s.io                        ✔
 * Xранение пакетов в удаленных репозиториях
 
 ```
-example/ 
-  Chart.yaml         # описание пакета 
-  README.md 
-  requirements.yaml  # список зависимостей 
+example/
+  Chart.yaml         # описание пакета
+  README.md
+  requirements.yaml  # список зависимостей
   values.yaml        # переменные
-  charts/            # загруженные зависимости 
+  charts/            # загруженные зависимости
   templates/         # шаблоны описания ресурсов Kubernetes
 ```
 ### Встрооенные переменные
@@ -2167,23 +2183,23 @@ example/
 * Capabilities - информация о возможностях кластера (например, версия Kubernetes)
 * Templates - информация о манифесте, из которого был создан ресурс
 
-### Использование публичных чартов, но своих переменных  
+### Использование публичных чартов, но своих переменных
 `helm install chartmuseum chartmuseum/chartmuseum -f kubernetes-templating/chartmuseum/values.yaml --namespace=chartmuseum --create-namespace`
 ### Циклы, условия и функции
-В основе Helm лежит шаблонизатор Go с 50+ встроенными функциями.  
+В основе Helm лежит шаблонизатор Go с 50+ встроенными функциями.
 
-Например:  
+Например:
 **Условия**:
-``` 
-{{- if .Values.server.persistentVolume.enabled }} 
-    persistentVolumeClaim: 
-      ... 
+```
+{{- if .Values.server.persistentVolume.enabled }}
+    persistentVolumeClaim:
+      ...
 {{- else }}
 ```
 **Циклы**:
 ```
-{{- range $key, $value := .Values.server.annotations }} 
-  {{ $key: }} {{ $value }} 
+{{- range $key, $value := .Values.server.annotations }}
+  {{ $key: }} {{ $value }}
 {{- end }}
 ```
 ### Hooks
@@ -2204,7 +2220,7 @@ example/
 * Возможность сохранить структуру зашифрованного файла (YAML, JSON)
 * Поддержка PGP и KMS (AWS, GCP)
 
-### Best practices  
+### Best practices
 * В большинстве имён и переменных стоит привязываться не к названию пакета, а к версии релиза
 * Указывайте все используемые в шаблонах переменные в values.yaml, выбирайте адекватные значения по умолчанию
 * Используйте команду helm create для генерации структуры своего chart
@@ -2232,7 +2248,7 @@ A chart can be either an 'application' or a 'library' chart.
 
 Для того, чтобы переопределить values для subchart-а необходимо в основном файле values прописать секцию с именем зависимости и в ней переопределить значения.
 
-У чарта могут быть тесты - например connection test после установки.  
+У чарта могут быть тесты - например connection test после установки.
 А так же постинсталл инфа формируется через NOTES.txt
 
 **“.”** означает текущую область значений (current scope), далее идет зарезервированное слово Values и путь до ключа. При рендере релиза сюда подставится значение, которое было определено по этому пути.
@@ -2263,8 +2279,8 @@ metadata:
     "helm.sh/resource-policy": keep
 ```
 
-## Helmfile  
-* Надстройка над helm - шаблонизатор шаблонизатора.  
+## Helmfile
+* Надстройка над helm - шаблонизатор шаблонизатора.
 * Управление развертыванием нескольких Helm Charts на нескольких окружениях
 * Возможность устанавливать Helm Charts в необходимом порядке
 * Больше шаблонизации, в том числе и в values.yaml
@@ -2297,9 +2313,9 @@ releases:
 * Для генерации YAML и передачи его в другие утилиты (например - kubectl):
 * `kubecfg show workers.jsonnet | kubectl apply -f -`
 
-### Kubecfg  
-Самый лучший на данный момент тул для работы с Jsonnet-ом  
-Общий workﬂow следующий: 
+### Kubecfg
+Самый лучший на данный момент тул для работы с Jsonnet-ом
+Общий workﬂow следующий:
 1. Импортируем подготовленную библиотеку с описанием ресурсов
 1. Пишем общий для сервисов шаблон
 1. Наследуемся от шаблона, указывая конкретные параметры
@@ -2318,24 +2334,29 @@ releases:
 1. Кастомизируем манифесты и применяем их (Можно делать как на лету, так и по очереди)
 1. Отлично подходит для labels , environment variables и много чего еще
 
-## cert-manager  
-Интересный инструмент, позволяющий автоматизировать работу с сертификатами.  
-Причём провайдерами могут выступать как Let’s Encrypt, HashiCorp Vault и Venafi, так и private PKI.  
+## cert-manager
+Интересный инструмент, позволяющий автоматизировать работу с сертификатами.
+Причём провайдерами могут выступать как Let’s Encrypt, HashiCorp Vault и Venafi, так и private PKI.
 
-Туториал для LetsEncrypt + Ingress-Nginx https://cert-manager.io/docs/tutorials/acme/nginx-ingress/
+Туториал для LetsEncrypt + Ingress-Nginx https://cert-manager.io/docs/tutorials/acme/nginx-ingress/.
 
-Для отладки используется великолепное приложение kuard, которое позволяет получить исчёрпывающую инфу о кластере и работе сети - https://github.com/kubernetes-up-and-running/kuard
+Другие полезные руководства, включая работу с gcloud, GKE и DNS; Istio; а также локальные варианты - https://cert-manager.io/docs/tutorials/.
 
-Для того, чтобы с помощью let's encrypt-а можно было получить сертификат, нужно выполнить следующее:  
+Для отладки используется великолепное приложение kuard от создателей книги Kubernetes Up and running, которое позволяет получить исчёрпывающую инфу о кластере и работе сети - https://github.com/kubernetes-up-and-running/kuard.
 
-1. Иметь в кластере ingress-контроллер (простейший пример - helm nginx)
-2. Установить в кластер сам cert-manager
-3. Иметь публичное (доступное для LE) доменное имя или зону, которая будет подтверждать сертификат - пришлось в GCP зарегать google domains
-4. Создать ingress для целевого сервиса, в котором будут аннотации на эмитента сертификата и блок с секретом tls:  
+Тип CRD Issuer определяет как cert-manager будет запрашивать TLS-сертификаты. Важно, что Issuers принадлежат namespace-ам, но есть также ClusterIssuer, который можно установить для всего кластера.
+Подробнее обо всех CRD - https://cert-manager.io/docs/concepts/.
+
+Для того, чтобы с помощью let's encrypt-а можно было получить сертификат, нужно выполнить следующее:
+
+1. Иметь в кластере ingress-контроллер (простейший пример - nginx)
+2. Установить в кластер сам cert-manager и его CRD
+3. Иметь публичное (доступное для LE) доменное имя или зону, которая будет подтверждать сертификат
+4. Создать ingress для целевого сервиса, в котором будут аннотации на эмитента сертификата и блок с секретом tls:
 
 ```
   annotations:
-    kubernetes.io/ingress.class: "nginx"    
+    kubernetes.io/ingress.class: "nginx"
     #cert-manager.io/issuer: "letsencrypt-staging"
 spec:
   tls:
@@ -2343,23 +2364,23 @@ spec:
     - example.example.com
     secretName: quickstart-example-tls
 ```
-5. Дальше работа идёт с 2мя видами эмитентов LE - staging и prod, потому что можно легко выйти за лимиты попыток подтверждения сертификатов у LE и нужно сначала протестировать корректность всей связки.  
+5. Дальше работа идёт с 2мя видами эмитентов LE - staging и prod, потому что можно легко выйти за лимиты попыток подтверждения сертификатов у LE и нужно сначала протестировать корректность всей связки.
 
-Создаётся 
+Создаётся
 ```
    apiVersion: cert-manager.io/v1
    kind: Issuer
    metadata:
      name: letsencrypt-prod
 ```
-через который на ингресс и делается фактический запрос у LE.  
+через который на ингресс и делается фактический запрос у LE.
 
 6. Deploy a TLS Ingress Resource
 
-Если выполнены все требования, то можно делать запрос на TLS сертификат.  
-Для этого существуют 2 способа:  
-1. Аннотации в ingress через ingress-shim
-2. Прямое создание ресурса сертификата  
+Если выполнены все требования, то можно делать запрос на TLS сертификат.
+Для этого существуют 2 способа:
+1. Аннотации в ingress через ingress-shim (который отслеживает все ингрессы в кластере и запрашивает подходящим сертификаты)
+2. Прямое создание ресурса сертификата
 
 Проще первый путь, так как простое раскомментирование строки `#cert-manager.io/issuer: "letsencrypt-staging"` позволяет cert-manager
 * Создать автоматом сертификат
@@ -2367,10 +2388,214 @@ spec:
 * Подтвердить домен
 * После того как домен подтверждён и выдан, cert-manager создаст и/или обновит секрет в сертификате
 
-Проверяем состояние выдачи `kubectl describe certificate quickstart-example-tls` и сам секрет серта `kubectl describe secret quickstart-example-tls`  
+Проверяем состояние выдачи `kubectl describe certificate quickstart-example-tls` и сам секрет серта `kubectl describe secret quickstart-example-tls`
 
 ## Homework part
 
+Чтобы для GKE из локального терминала получать креды через `gcloud`, необходимо установить auth-plugin:
+`gcloud components install gke-gcloud-auth-plugin` и `export USE_GKE_GCLOUD_AUTH_PLUGIN=True` (https://cloud.google.com/blog/products/containers-kubernetes/kubectl-auth-changes-in-gke).
+
+После уже можно использовать новую команду без **beta** вида: `gcloud container clusters get-credentials <cluster_name>`
+
+
+Stable helm переехал : https://helm.sh/blog/new-location-stable-incubator-charts/,
+в связи с чем нужна команда `helm repo add stable https://charts.helm.sh/stable`
+
+| Name | Old Location | New Location |
+|------|--------------|--------------|
+|stable|https://kubernetes-charts.storage.googleapis.com | https://charts.helm.sh/stable |
+
+#### **--atomic**
+Самый полезный ключ это `--atomic`: if set, the installation process deletes the installation on failure. The **--wait** flag will be set **automatically** if --atomic is used.
+Он меня спас несколько раз, подчищая за неудавшимися установками хвосты, которые могли бы приводить к конфликтам или мисконфигурациям.
+
+##### Nginx-ingress helm installation
+
+В итоге использовал самую последнюю версию ингресса,
+`helm upgrade --install nginx-ingress ingress-nginx/ingress-nginx --atomic --namespace=nginx-ingress --version=4.4.0`,
+репо, которой взял отсюда: https://kubernetes.github.io/ingress-nginx/deploy/#quick-start.
+
+
+##### Cert-manager helm and CRD installation
+https://github.com/cert-manager/cert-manager/blob/master/deploy/charts/cert-manager/README.template.md
+
+Before installing the chart, you must first install the cert-manager CustomResourceDefinition resources. This is performed in a separate step to allow you to easily uninstall and reinstall cert-manager without deleting your installed custom resources.
+
+CRD содержат сертификаты, CA, заказы сертификатов, типы проверок и тп.
+Именно поэтому, чтобы не относится к релизам и случайно не стирать сертификаты и историю их установка не вшита в хелм чарт.
+
+`kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/{{RELEASE_VERSION}}/cert-manager.crds.yaml`
+
+После установки CRD можно устанавливать релиз из чарта.
+
+`helm install cert-manager-{{RELEASE_VERSION}} --namespace cert-manager --version {{RELEASE_VERSION}} jetstack/cert-manager --atomic`
+
+##### A-record IP <---> Domain
+Далее пришлось A-запись, указывающую на адрес в своём DNS-е.
+
+##### Настройка LE как issuer-а
+Automated Certificate Management Environment (ACME) https://cert-manager.io/docs/configuration/acme/ бывают 3х видов, но используются 2:
+1. HTTP01 - создаёт ключ, доступный по http url-у, который будет соответствовать запрашиваемому доменному имени.
+2. DNS01 - нужно добавить ключ в TXT-запись, после чего сервер ACME, сделав lookup,  challenges are completed by providing a computed key that is present at a DNS TXT record.
+
+Так как у LE жёсткие лимиты на количество запросов подтверждения, то необходимо создать 2 CRD Issuer-а - один для тестов, а другой для боевого применения.
+
+Адреса для HTTP01-проверки у Let's Encrypt так и разделяются:
+1. https://acme-staging-v02.api.letsencrypt.org/directory
+2. https://acme-v02.api.letsencrypt.org/directory
+
+```
+spec:
+  acme:
+    # The ACME server URL
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    # Email address used for ACME registration
+    email: some@gmail.com
+    # Name of a secret used to store the ACME account private key
+    privateKeySecretRef:
+      name: letsencrypt-staging
+    # Enable the HTTP-01 challenge provider
+    solvers:
+    - http01:
+        ingress:
+          class:  nginx
+```
+
+После того как Issuer-ы будут созданы, cert-manager будет знать как и куда обращаться за сертификатом и подтверждением того, что доменное имя действительно принадлежит ресурсу.
+
+##### Развёртка Ingress с TLS
+Теперь, наконец, можно запрашивать сертификаты.
+
+Когда у нас есть серт-менеджер, который знает как и куда обращаться, статический айпишник, по которому доступен ингресс-контроллер извне, доменное имя для ингресса с записью для этого айпишника.
+
+Для этого можно использовать 2 способа:
+1. Используя аннотации в ingress через ingress-shim (контоллер cert-manager, следящий за ингрессами, чтобы вязать к ним сертификаты https://cert-manager.io/docs/usage/ingress/)
+2. Напрямую создавать кастом ресурс типа Certificate
+
+Далее мы используем автоматизированный вариант с аннотациями, чтобы ingress-shim создал ресурс сертификата. После его создания cert-manager  обновит или создаст ingress для подтверждения домена. Как только домен будет подтверждён cert-manager создаст secret, который определён в ресурсе certificate.
+То есть ресурс сертификата ссылается на секрет! А внутри самого секрета уже пэйлод сертификата.
+Важно, что имена и ссылки в ингрессах, сертификатах и секретах должны совпадать.
+
+После редактирования cert-manager.io/issuer
+```
+kind: Ingress
+metadata:
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/issuer: "letsencrypt-staging"
+```
+Получаем: `(STAGING) Let's Encrypt` - то есть полный порядок, получили тестовый сертификат от LE, можно запрашивать настоящий через `cert-manager.io/issuer: "letsencrypt-prod"`
+
+```
+❯ k get certificates.cert-manager.io
+NAME                     READY   SECRET                   AGE
+quickstart-example-tls   True    quickstart-example-tls   8m23s
+```
+и в браузере `Verified by: Let's Encrypt`
+
+
+### Chartmuseum
+Чарт устарел и не разрабатывается: его нельзя поставить на кластер 1.22 и выше (https://kubernetes.io/docs/reference/using-api/deprecation-guide/#ingress-v122), не отредактировав исходники, так как он использует неправильные пути к ресурсу ингресса в шаблонах:
+```
+❯ helm upgrade --install chartmuseum stable/chartmuseum --atomic \
+--namespace=chartmuseum \
+--version=2.14.2 \
+-f chartmuseum/values.yaml
+Release "chartmuseum" does not exist. Installing it now.
+WARNING: This chart is deprecated
+Error: unable to build kubernetes objects from release manifest: unable to recognize "": no matches for kind "Ingress" in version "networking.k8s.io/v1beta1"
+```
+
+Для этого приходится откатывать кластер!
+
+### Chartmuseum | Задание со ⭐
+#### Values auth
+Для того, чтобы включить загрузку с помощью логина и пароля:
+```
+env:
+  open:
+  DISABLE_API: false
+  secret:
+    # username for basic http authentication
+    BASIC_AUTH_USER:user
+    # password for basic http authentication
+    BASIC_AUTH_PASS:password
+```
+
+Docs - https://chartmuseum.com/docs/#uploading-a-chart-package
+
+#### Создание чарта
+Осуществляется командой Helm:
+```
+cd mychart/
+helm package .
+```
+Также можно загрузить уже готовый чарт для prometheus-оператора напрямую по URL:
+```
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm pull prometheus-community/kube-prometheus-stack -d ./
+```
+После этого появится файл `kube-prometheus-stack-43.1.1.tgz`
+
+#### Загрузка в chartmuseum
+
+Осуществляется командой:
+`curl -u user:password --data-binary "@kube-prometheus-stack-43.1.1.tgz" https://chartmuseum.35.198.148.234.nip.io/api/charts`
+
+Если же пакет подписан и для него существует provenance file, нужно его загрузить рядом:
+`curl -u user:password --data-binary "@kube-prometheus-stack-43.1.1.tgz.prov" https://chartmuseum.35.198.148.234.nip.io/api/prov`
+
+Можно загрузить одновременно оба файла используя /api/charts и multipart/form-data тип:
+`curl -u user:password -F "chart=@kube-prometheus-stack-43.1.1.tgz" -F "prov=@kube-prometheus-stack-43.1.1.tgz.prov" https://chartmuseum.35.198.148.234.nip.io/api/charts`
+
+Но можно использовать просто helm-push:
+
+`helm push mychart/ chartmuseum`
+
+#### Установка чарта в k8s:
+Add the URL to your ChartMuseum installation to the local repository list:
+
+```
+helm repo add chartmuseum-nip https://chartmuseum.35.198.148.234.nip.io --username=user --password=password
+"chartmuseum-nip" has been added to your repositories
+```
+После этого выполняется поиск по чартам музея:
+
+`helm search repo chartmuseum-nip`
+
+Выбирается нужный и устанавливается:
+`helm install chartmuseum-nip/kube-prometheus-stack`
+
+### Harbor Helm
+
+
+## GKE ingress static IP binding
+
+Используются 2 аннотации в описании ингресса - класс и имя статического айпи, которое указывали при его создании.
+
+```
+kind: Ingress
+metadata:
+  name: web-ingress
+  annotations:
+    # This tells Google Cloud to create an External Load Balancer to realize this Ingress
+    kubernetes.io/ingress.class: gce
+    # This enables HTTP connections from Internet clients
+    kubernetes.io/ingress.allow-http: "true"
+    # This tells Google Cloud to associate the External Load Balancer with the static IP which we created earlier
+    kubernetes.io/ingress.global-static-ip-name: web-ip # This is the name of static IP in list
+```
+
+### Promote ephemeral to static IP
+
+To promote the allocated IP to static, you can update the Service manifest:
+
+`kubectl patch svc ingress-nginx-lb -p '{"spec": {"loadBalancerIP": "104.154.109.191"}}'`
+
+... and promote the IP to static (promotion works differently for cloudproviders, provided example is for GKE/GCE):
+
+`gcloud compute addresses create ingress-nginx-lb --addresses 104.154.109.191 --region us-central1`
 
 ---
 
