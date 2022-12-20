@@ -33,7 +33,7 @@ expose:
       notarySecretName: ""
   ingress:
     hosts:
-      core: 35.198.148.234.nip.io
+      core: ingress.saneinsane.ru
       # notary: notary.harbor.domain
     # set to the type of ingress controller if it has specific requirements.
     # leave as `default` for most ingress controllers.
@@ -43,7 +43,7 @@ expose:
     controller: default
     ## Allow .Capabilities.KubeVersion.Version to be overridden while creating ingress
     kubeVersionOverride: ""
-    className: ""
+    className: "nginx"
     annotations:
       # note different ingress controllers may require a different ssl-redirect annotation
       # for Envoy, use ingress.kubernetes.io/force-ssl-redirect: "true" and remove the nginx lines below
@@ -51,6 +51,7 @@ expose:
       ingress.kubernetes.io/proxy-body-size: "0"
       nginx.ingress.kubernetes.io/ssl-redirect: "true"
       nginx.ingress.kubernetes.io/proxy-body-size: "0"
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
     notary:
       # notary ingress-specific annotations
       annotations: {}
@@ -123,7 +124,7 @@ expose:
 # the IP address of k8s node
 #
 # If Harbor is deployed behind the proxy, set it as the URL of proxy
-externalURL: https://35.198.148.234.nip.io
+externalURL: https://ingress.saneinsane.ru
 
 # The internal TLS used for harbor components secure communicating. In order to enable https
 # in each components tls cert files need to provided in advance.
@@ -207,7 +208,7 @@ persistence:
   # operation. Leaving it empty will delete PVCs after the chart deleted
   # (this does not apply for PVCs that are created for internal database
   # and redis components, i.e. they are never deleted automatically)
-  resourcePolicy: "keep"
+  resourcePolicy: ""
   persistentVolumeClaim:
     registry:
       # Use the existing PVC which must be created manually before bound,
@@ -708,7 +709,7 @@ trivy:
   priorityClassName:
 
 notary:
-  enabled: true
+  enabled: false
   server:
     # set the service account to be used, default if left empty
     serviceAccountName: ""

@@ -2212,7 +2212,7 @@ example/
 * `pre/post-rollback`
 
 ### Helm Secrets
-Плагин helm-secrets предлагает секретное управление и защиту вашей важной информации. Он делегирует секретное шифрование Mozilla SOPS
+Плагин helm-secrets предлагает секретное управление и защиту вашей важной информации. Он делегирует секретное шифрование Mozilla SOPS https://github.com/jkroepke/helm-secrets.
 
 * Плагин для Helm
 * Механизм удобного* хранения и деплоя секретов для тех, у кого нет HashiCorp Vault
@@ -2249,7 +2249,7 @@ A chart can be either an 'application' or a 'library' chart.
 Для того, чтобы переопределить values для subchart-а необходимо в основном файле values прописать секцию с именем зависимости и в ней переопределить значения.
 
 У чарта могут быть тесты - например connection test после установки.
-А так же постинсталл инфа формируется через NOTES.txt
+Информация, которая выводится в аутпут после установки чарта формируется через NOTES.txt - например, ссылка на внешнее доменное имя, токены доступа и дальнейшие инструкции по конфигурации.
 
 **“.”** означает текущую область значений (current scope), далее идет зарезервированное слово Values и путь до ключа. При рендере релиза сюда подставится значение, которое было определено по этому пути.
 ### 3-way merge
@@ -2263,7 +2263,7 @@ A chart can be either an 'application' or a 'library' chart.
 
 Эта схема называется 3-way merge. Таким образом Helm приведет конфигурацию приложения к состоянию, которое описано в git, но не тронет другие изменения. Т. е., если у вас в кластере есть какая-то сущность, которая трансформирует ваши примитивы (например, Service Mesh), то Helm отнесется к ним бережно.
 
-##### Следующая аннотация позволяет развертывать новые развертывания (Deployments) при изменении ConfigMap:
+##### Следующая аннотация позволяет развертывать новые Deployments при изменении ConfigMap:
 ```
 kind: Deployment
 spec:
@@ -2280,6 +2280,7 @@ metadata:
 ```
 
 ## Helmfile
+
 * Надстройка над helm - шаблонизатор шаблонизатора.
 * Управление развертыванием нескольких Helm Charts на нескольких окружениях
 * Возможность устанавливать Helm Charts в необходимом порядке
@@ -2299,6 +2300,19 @@ releases:
 ...
     - ./values/{{`{{ .Release.Name }}`}}.yaml.gotmpl
 ```
+Отличная статья по использованию helmfile как IaC с разделением окружений https://habr.com/ru/post/491108/ и Ссылка на репо с правильной иерархией директорий - https://github.com/zam-zam/helmfile-examples.
+
+### Божественная фича - возможность накатывать простые yaml манифесты из поддиректорий!S
+
+Создаёшь поддиректорию в которой находится нечто, что создаётся вне чартов.
+Например, ClusterIssuer для cert-manager-а и helmfile автоматически его поставит.
+```
+- name: cert-manager-cluster-issuer
+  chart: ./issuer-cr
+```
+### Если важна последовательная установка чартов из манифестов
+`helmfile sync --concurrency=1 ...`
+
 ## Jsonnet
 
 * Продукт от Google
@@ -2350,7 +2364,7 @@ releases:
 Для того, чтобы с помощью let's encrypt-а можно было получить сертификат, нужно выполнить следующее:
 
 1. Иметь в кластере ingress-контроллер (простейший пример - nginx)
-2. Установить в кластер сам cert-manager и его CRD
+2. Установить в кластер сам cert-manager и его CRD (ставятся обычно отдельно, но можно и через чарт `--set installCRDs=true`)
 3. Иметь публичное (доступное для LE) доменное имя или зону, которая будет подтверждать сертификат
 4. Создать ingress для целевого сервиса, в котором будут аннотации на эмитента сертификата и блок с секретом tls:
 
@@ -2375,6 +2389,8 @@ spec:
 ```
 через который на ингресс и делается фактический запрос у LE.
 
+Важно, что ingress annotation для ClusterIssuer пишется через дефис: `cert-manager.io/cluster-issuer`
+
 6. Deploy a TLS Ingress Resource
 
 Если выполнены все требования, то можно делать запрос на TLS сертификат.
@@ -2389,6 +2405,24 @@ spec:
 * После того как домен подтверждён и выдан, cert-manager создаст и/или обновит секрет в сертификате
 
 Проверяем состояние выдачи `kubectl describe certificate quickstart-example-tls` и сам секрет серта `kubectl describe secret quickstart-example-tls`
+
+#### Cert-manager Debug
+Удобно дебажить делая describe следующим ресурсам, если что-то пошло не так.
+
+```
+❯ k -n harbor describe certificaterequests.cert-manager.io
+Events:
+  Type    Reason           Age    From                                                Message
+  ----    ------           ----   ----                                                -------
+  Normal  cert-manager.io  2m36s  cert-manager-certificaterequests-approver           Certificate request has been approved by cert-manager.io
+  Normal  IssuerNotFound   2m36s  cert-manager-certificaterequests-issuer-vault       Referenced "Issuer" not found: issuer.cert-manager.io "letsencrypt-prod" not found
+```
+После фикса
+```
+❯ k -n harbor get certificates.cert-manager.io
+NAME             READY   SECRET           AGE
+harbor-ingress   True    harbor-ingress   71s
+```
 
 ## Homework part
 
@@ -2422,7 +2456,7 @@ https://github.com/cert-manager/cert-manager/blob/master/deploy/charts/cert-mana
 Before installing the chart, you must first install the cert-manager CustomResourceDefinition resources. This is performed in a separate step to allow you to easily uninstall and reinstall cert-manager without deleting your installed custom resources.
 
 CRD содержат сертификаты, CA, заказы сертификатов, типы проверок и тп.
-Именно поэтому, чтобы не относится к релизам и случайно не стирать сертификаты и историю их установка не вшита в хелм чарт.
+Именно поэтому, чтобы не относится к релизам и случайно не стирать сертификаты и историю их установка не включа в хелм чарт по умолчаню (To automatically install and manage the CRDs as part of your Helm release, you must add the `--set installCRDs=true` flag to your Helm installation command).
 
 `kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/{{RELEASE_VERSION}}/cert-manager.crds.yaml`
 
@@ -2568,6 +2602,78 @@ helm repo add chartmuseum-nip https://chartmuseum.35.198.148.234.nip.io --userna
 `helm install chartmuseum-nip/kube-prometheus-stack`
 
 ### Harbor Helm
+Использую новую версию чарта, так как на текущих версиях GKE (kuber 1.24) возникают проблемы с совместимостью:
+https://github.com/goharbor/harbor-helm/tree/v1.10.2
+
+* expose.ingress.hosts.core - меняем на свой адрес
+* expose.ingress.hosts.notary - глушим
+* expose.ingress.className: `"nginx"`
+* expose.ingress.annotations: `cert-manager.io/issuer: "letsencrypt-staging"`
+* persistence.resourcePolicy: "" instead of keep for pvc auto
+* `notary:   enabled: falseremoval`
+
+Важно не забыть установить CR Issuer cert-manager-а в namespace harbor, так как они namespaced, а кластерные до этого не устанавливались!
+
+```
+helm upgrade --install harbor harbor/harbor --create-namespace \
+--atomic \
+--namespace=harbor \
+--version=1.10.2 \
+-f harbor/values.yaml
+```
+Конечно же я получил следующее:
+```
+Events:
+  Type     Reason           Age   From                                          Message
+  ----     ------           ----  ----                                          -------
+  Warning  OrderFailed      12m   cert-manager-certificaterequests-issuer-acme  Failed to wait for order resource "harbor-ingress-zbgnq-3472572959" to become ready: order is in "errored" state: Failed to create Order: 429 urn:ietf:params:acme:error:rateLimited: Error creating new order :: too many certificates already issued for "nip.io". Retry after 2022-12-20T14:00:00Z: see https://letsencrypt.org/docs/rate-limits/
+```
+Поменял на своё доменное имя, предварительно связав IP ингресса с ним, после чего обновил чарт той же командой, что и устанавливал.
+```
+❯ kubectl get secrets -n harbor -l owner=helm
+NAME                           TYPE                 DATA   AGE
+sh.helm.release.v1.harbor.v1   helm.sh/release.v1   1      17m
+sh.helm.release.v1.harbor.v2   helm.sh/release.v1   1      2m47s
+```
+Интересно, что при этом релиз приложения не изменился, но харбор сделал новый релиз, проставив свою версию.
+После этого где-то вылез по таймауту при апгрейде и из-за atomic-а сделал автоматический roll-back.
+Проблема оказалась почему-то в PVC и таймауте привязок, переустановка решила проблему.
+
+### Helmﬁle | Задание со ⭐
+Использую новую версию - https://github.com/helmfile/helmfile/blob/v0.149.0/docs/index.md
+
+Переменные для harbor-а брал отсюда - https://github.com/goharbor/harbor-helm/tree/v1.10.2#configuration
+
+Почему не вшили в cert-manager возможность ставить через helm nginx clusterIssuer-ов опционально, передавая доменное имя и email - неясно.
+
+Решил следующим образом: в helmfile есть возможность накатывать обычные yaml манифесты, если их положить в поддиректорию. Главное, ставить последовательно  `--concurrency 1`, чтобы не было ошибки.
+
+
+```
+- name: cert-manager-cluster-issuer
+  chart: ./issuer-cr
+```
+Перед установкой, после сборки helmfile, делаю `helmfile lint`, чтобы убедится в доступности всех чартов.
+
+Установка:
+`helmfile sync -f helmfile.yaml --concurrency 1`
+
+После всего стоит проверить, что адрес, который получил ингресс контроллер совпадает с указанным в DNS-записи.
+`k get -n ingress-nginx svc ingress-nginx-controller  -o jsonpath="{.status.loadBalancer.ingress..ip}"`
+
+
+## Retrieving data from secrets
+
+В секрете хранится иерархическая структура, легко представима в виде json или в виде yaml.
+
+Поэтому к полям можно получить доступ через встроенный аналог jq в например так:
+`kubectl get secrets/db-user-pass --template={{.data.password}} | base64 --decode` == `kubectl get secret db-user-pass -o jsonpath='{.data.password}' | base64 --decode`
+
+Но так как содержимое секретных полей закодировано в base64, то необходима раскодировка на лету.
+
+Если не хочется мучаться с двойными скобками и именами содержащими точку, то можно выводить в json и обрабатывать реальным jq:
+`k -n harbor get secret letsencrypt-prod -o json | jq -r '.data."tls.key"' | base64 -d`
+
 
 
 ## GKE ingress static IP binding
