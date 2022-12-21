@@ -1614,6 +1614,28 @@ Opaque - непрозрачный, матовый, мрак.
 Это указатель на структуру данных какого-то неопределенного типа.
 Например, стандартная библиотека, которая является частью спецификации языка программирования C, предоставляет функции ввода-вывода для файлов, которые возвращают или принимают значения типа «указатель на FILE», представляющие собой файловые потоки, но конкретная реализация типа FILE является скрытой.
 
+Также, если открыть Wireshark и посмотреть на содержание фрейма, с запросом к kubectl к api-server, в котором есть данные прикладного уровня, то можно увидеть подобную картину, где данные приложения зашифрованы и называются Opaque Type:
+```
+Frame 27: 577 bytes on wire (4616 bits), 577 bytes captured (4616 bits) on interface wlp2s0, id 0
+Ethernet II, Src: #####, Dst: #####
+Internet Protocol Version 4, Src: #####, Dst: #####
+Transmission Control Protocol, Src Port: 37568, Dst Port: 443, Seq: 352, Ack: 1797, Len: 511
+Transport Layer Security
+    TLSv1.3 Record Layer: Application Data Protocol: http-over-tls
+        Opaque Type: Application Data (23)
+        Version: TLS 1.2 (0x0303)
+        Length: 81
+        Encrypted Application Data: e06d882842c816e3395035ef01a7aab11335d1260b450f11d52776695fe53a9029f36bf2…
+        [Application Data Protocol: http-over-tls]
+    TLSv1.3 Record Layer: Application Data Protocol: http-over-tls
+        Opaque Type: Application Data (23)
+        Version: TLS 1.2 (0x0303)
+        Length: 420
+        Encrypted Application Data: 1d9c6319480e2ddb80c336c82cb60edee0226b4b2872a24be0505e4588bb72ee28be73ac…
+        [Application Data Protocol: http-over-tls]
+```
+
+
 ### Opaque in Kubernetes Secrets
 
 Получается, что в случае кубера идея была в том, что создав секрет, получающий из него данные pod, не может получить список всех ключей в нём, но может использовать из него значения, только если точно знает имя ключа.
@@ -2185,6 +2207,11 @@ example/
 
 ### Использование публичных чартов, но своих переменных
 `helm install chartmuseum chartmuseum/chartmuseum -f kubernetes-templating/chartmuseum/values.yaml --namespace=chartmuseum --create-namespace`
+
+### Поиск по центральному хабу и своим репозиториям
+* `helm search hub` searches the Artifact Hub (like docker hub), which lists helm charts from dozens of different repositories. (e.g. https://artifacthub.io/packages/helm/prometheus-community/kube-prometheus-stack)
+* `helm search repo` searches the repositories that you have added to your local helm client (with `helm repo add`). This search is done over local data, and no public network connection is needed.
+
 ### Циклы, условия и функции
 В основе Helm лежит шаблонизатор Go с 50+ встроенными функциями.
 
@@ -2653,6 +2680,11 @@ sh.helm.release.v1.harbor.v2   helm.sh/release.v1   1      2m47s
 - name: cert-manager-cluster-issuer
   chart: ./issuer-cr
 ```
+Интересно, что в качестве источника хелм чарта можно использовать даже гит с указанием ветки
+
+`docker run --rm --net=host -v "${HOME}/.kube:/root/.kube" -v "${HOME}/.config/helm:/root/.config/helm" -v "${PWD}:/wd" --workdir /wd quay.io/roboll/helmfile:helm3-v0.142.0 helmfile sync`
+
+
 Перед установкой, после сборки helmfile, делаю `helmfile lint`, чтобы убедится в доступности всех чартов.
 
 Установка:
@@ -2660,6 +2692,19 @@ sh.helm.release.v1.harbor.v2   helm.sh/release.v1   1      2m47s
 
 После всего стоит проверить, что адрес, который получил ингресс контроллер совпадает с указанным в DNS-записи.
 `k get -n ingress-nginx svc ingress-nginx-controller  -o jsonpath="{.status.loadBalancer.ingress..ip}"`
+
+## Создаем свой helm chart
+Опять ошибка в домашке с out-of-date образами:
+
+v0.3.4
+
+https://console.cloud.google.com/gcr/images/google-samples/global/microservices-demo/adservice
+
+
+Дефолтно не хватило ресурсов в кластере - пришлось создавать ещё одну воркер ноду.
+
+### Создаем свой helm chart | Задание со ⭐
+
 
 
 ## Retrieving data from secrets
