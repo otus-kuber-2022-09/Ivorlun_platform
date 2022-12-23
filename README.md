@@ -2188,6 +2188,8 @@ selfsubjectrulesreviews.authorization.k8s.io                        ✔
 * Управление зависимостями между пакетами
 * Xранение пакетов в удаленных репозиториях
 
+Фактически очень гибкий щаблонизатор с широченными возможностями - куча встроенных переменных, возможность получения переменных и шаблонов отовсюду, тесты и тп. Есть опции  `--dry-run --debug`, которые позволяют проверить шаблоны на правильное вычисление значений и тп.
+
 ```
 example/
   Chart.yaml         # описание пакета
@@ -2197,6 +2199,11 @@ example/
   charts/            # загруженные зависимости
   templates/         # шаблоны описания ресурсов Kubernetes
 ```
+
+Документация сама является прекрасным пошаговым руководством - https://helm.sh/docs/chart_template_guide/getting_started/
+
+Если подумать, то чарты, однозначно полезнее в случае, когда необходимо заниматься дистрибуцией своего приложения, в то время как управление через GitOps, типа ArgoCD или Flux, гораздо удобнее, когда в этом нет необходимости.
+
 ### Встрооенные переменные
 
 * Release - информация об устанавливаемом release
@@ -2205,17 +2212,15 @@ example/
 * Capabilities - информация о возможностях кластера (например, версия Kubernetes)
 * Templates - информация о манифесте, из которого был создан ресурс
 
-### Использование публичных чартов, но своих переменных
-`helm install chartmuseum chartmuseum/chartmuseum -f kubernetes-templating/chartmuseum/values.yaml --namespace=chartmuseum --create-namespace`
-
-### Поиск по центральному хабу и своим репозиториям
-* `helm search hub` searches the Artifact Hub (like docker hub), which lists helm charts from dozens of different repositories. (e.g. https://artifacthub.io/packages/helm/prometheus-community/kube-prometheus-stack)
-* `helm search repo` searches the repositories that you have added to your local helm client (with `helm repo add`). This search is done over local data, and no public network connection is needed.
+Внутри этих классов могут быть весьма сложные и полезные вроде:
+* `Files.AsSecrets` is a function that returns the file bodies as Base 64 encoded strings.
+* `Capabilities.APIVersions.Has $version` indicates whether a version (e.g., batch/v1) or resource (e.g., apps/v1/Deployment) is available on the cluster.
 
 ### Циклы, условия и функции
 В основе Helm лежит шаблонизатор Go с 50+ встроенными функциями.
 
 Например:
+
 **Условия**:
 ```
 {{- if .Values.server.persistentVolume.enabled }}
@@ -2223,12 +2228,51 @@ example/
       ...
 {{- else }}
 ```
+
 **Циклы**:
 ```
 {{- range $key, $value := .Values.server.annotations }}
   {{ $key: }} {{ $value }}
 {{- end }}
 ```
+
+**Операторы сравнения**:
+`eq, ne, lt, gt, and, or ...`
+
+**Printf**:
+```
+name: {{ printf "%s-master" (include "common.names.fullname" .) }}
+---
+common.names.fullname: redis
+---
+name: redis-master
+
+```
+Список большой - https://helm.sh/docs/chart_template_guide/function_list/
+
+### Pipelines
+
+По аналогии с пайпами в unix
+
+One of the powerful features of the template language is its concept of pipelines. Drawing on a concept from UNIX, pipelines are a tool for chaining together a series of template commands to compactly express a series of transformations. In other words, pipelines are an efficient way of getting several things done in sequence.
+
+`drink: {{ .Values.favorite.drink | repeat 5 | quote }}`
+
+приведёт к повторению переменной 5 раз и последующему заключению в кавычки
+
+`drink: "coffeecoffeecoffeecoffeecoffee"`
+
+Ещё есть фунции default и lookup:
+* drink: {{ .Values.favorite.drink | default "tea" | quote }}
+* The `lookup` function can be used to look up resources in a running cluster.  When lookup returns a list of objects, it is possible to access the object list via the items field:
+```
+{{ range $index, $service := (lookup "v1" "Service" "mynamespace" "").items }}
+    {{/* do something with each service */}}
+{{ end }}
+```
+For templates, the operators (eq, ne, lt, gt, and, or and so on) are all implemented as functions. In pipelines, operations can be grouped with parentheses ((, and )).
+
+
 ### Hooks
 Определенные действия, выполняемые в различные моменты жизненного цикла поставки. Hook, как правило, запускает Job (но это не обязательно).
 
@@ -2238,14 +2282,28 @@ example/
 * `pre/post-upgrade`
 * `pre/post-rollback`
 
+### Использование публичных чартов, но своих переменных
+`helm install chartmuseum chartmuseum/chartmuseum -f kubernetes-templating/chartmuseum/values.yaml --namespace=chartmuseum --create-namespace`
+
+### Поиск по центральному хабу и своим репозиториям
+* `helm search hub` searches the Artifact Hub (like docker hub), which lists helm charts from dozens of different repositories. (e.g. https://artifacthub.io/packages/helm/prometheus-community/kube-prometheus-stack)
+* `helm search repo` searches the repositories that you have added to your local helm client (with `helm repo add`). This search is done over local data, and no public network connection is needed.
+
 ### Helm Secrets
-Плагин helm-secrets предлагает секретное управление и защиту вашей важной информации. Он делегирует секретное шифрование Mozilla SOPS https://github.com/jkroepke/helm-secrets.
+Плагин helm-secrets (https://github.com/jkroepke/helm-secrets) предлагает секретное управление и защиту вашей важной информации. Он делегирует секретное шифрование Mozilla SOPS.
+Ставится самим хелмом в сам хелм и, используя разные механизмы шифрования, может на лету расшифровывать зашифрованные значения в применяемых манифестах или шаблонах.
+
+Важно, что команда в таком случае заменяется с `helm upgrade` на `helm secrets upgrade`.
+
+Шифрование может осуществляться, например находящимися на машине PGP-ключами (например парой RSA), с которой выполняются `helm secrets upgrade` - то есть значения можно пушить в гит, но должна быть доверенная среда исполнения.
 
 * Плагин для Helm
 * Механизм удобного* хранения и деплоя секретов для тех, у кого нет HashiCorp Vault
-* Реализован поверх другого решения - Mozilla Sops
-* Возможность сохранить структуру зашифрованного файла (YAML, JSON)
-* Поддержка PGP и KMS (AWS, GCP)
+* Реализован поверх другого решения - Mozilla Sops (https://github.com/mozilla/sops)
+* Возможность сохранить структуру зашифрованного файла (YAML, JSON, ENV, INI and BINARY)
+* Поддержка PGP и KMS (AWS KMS, GCP KMS, Azure Key Vault, age, and PGP.)
+
+Очень полезная штука, когда нет Vault.
 
 ### Best practices
 * В большинстве имён и переменных стоит привязываться не к названию пакета, а к версии релиза
@@ -2279,6 +2337,7 @@ A chart can be either an 'application' or a 'library' chart.
 Информация, которая выводится в аутпут после установки чарта формируется через NOTES.txt - например, ссылка на внешнее доменное имя, токены доступа и дальнейшие инструкции по конфигурации.
 
 **“.”** означает текущую область значений (current scope), далее идет зарезервированное слово Values и путь до ключа. При рендере релиза сюда подставится значение, которое было определено по этому пути.
+
 ### 3-way merge
 Работает Helm 3 следующим образом:
 
@@ -2290,6 +2349,16 @@ A chart can be either an 'application' or a 'library' chart.
 
 Эта схема называется 3-way merge. Таким образом Helm приведет конфигурацию приложения к состоянию, которое описано в git, но не тронет другие изменения. Т. е., если у вас в кластере есть какая-то сущность, которая трансформирует ваши примитивы (например, Service Mesh), то Helm отнесется к ним бережно.
 
+### Subcharts
+* A subchart is considered "stand-alone", which means a subchart can never explicitly depend on its parent chart.
+* For that reason, a subchart cannot access the values of its parent.
+* A parent chart can override values for subcharts.
+* Helm has a concept of global values that can be accessed by all charts.
+
+helm upgrade --install hipster-shop kubernetes-templating/hipster-shop --namespace hipster-shop **--set frontend.service.NodePort=31234**
+Так как как мы меняем значение переменной для зависимости - перед названием
+переменной указываем имя (название chart) этой зависимости.
+
 ##### Следующая аннотация позволяет развертывать новые Deployments при изменении ConfigMap:
 ```
 kind: Deployment
@@ -2299,12 +2368,18 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
 ```
+
 ##### Отказ от удаления ресурсов с помощью политик ресурсов (PVC for example):
 ```
 metadata:
   annotations:
     "helm.sh/resource-policy": keep
 ```
+
+## "Sealed Secrets" for Kubernetes by bitnami
+https://github.com/bitnami-labs/sealed-secrets
+
+Encrypt your Secret into a SealedSecret, which is safe to store - even to a public repository. The SealedSecret can be decrypted only by the controller running in the target cluster and nobody else (not even the original author) is able to obtain the original Secret from the SealedSecret.
 
 ## Helmfile
 
@@ -2329,7 +2404,7 @@ releases:
 ```
 Отличная статья по использованию helmfile как IaC с разделением окружений https://habr.com/ru/post/491108/ и Ссылка на репо с правильной иерархией директорий - https://github.com/zam-zam/helmfile-examples.
 
-### Божественная фича - возможность накатывать простые yaml манифесты из поддиректорий!S
+### Божественная фича - возможность накатывать простые yaml манифесты из поддиректорий!
 
 Создаёшь поддиректорию в которой находится нечто, что создаётся вне чартов.
 Например, ClusterIssuer для cert-manager-а и helmfile автоматически его поставит.
@@ -2347,7 +2422,7 @@ releases:
 * Любой валидный JSON - валидный Jsonnet (как YAML)
 * Полноценный язык программирования* (заточенный под шаблонизацию) (не как YAML)
 
-### Зачем (в большинстве - незачем)
+### Зачем (в подовляющем большинстве случаев - незачем)
 
 * Для генерации и применения манифестов множества однотипных ресурсов, отличающихся несколькими параметрами
 * Если есть ненависть к YAML, многострочным портянкам на YAML и отступам в YAML
@@ -2355,9 +2430,12 @@ releases:
 * `kubecfg show workers.jsonnet | kubectl apply -f -`
 
 ### Kubecfg
-Самый лучший на данный момент тул для работы с Jsonnet-ом
+Самый лучший на данный момент тул для работы с Jsonnet-ом.
+
+Позволяет делать шаблоны манифестов в виде json-шаблонов используя библиотеку для интерпретации, например - libsonnet.
+
 Общий workﬂow следующий:
-1. Импортируем подготовленную библиотеку с описанием ресурсов
+1. Импортируем подготовленную библиотеку с описанием ресурсов https://github.com/bitnami-labs/kube-libsonnet/blob/v1.19.0/kube.libsonnet
 1. Пишем общий для сервисов шаблон
 1. Наследуемся от шаблона, указывая конкретные параметры
 
@@ -2694,16 +2772,95 @@ sh.helm.release.v1.harbor.v2   helm.sh/release.v1   1      2m47s
 `k get -n ingress-nginx svc ingress-nginx-controller  -o jsonpath="{.status.loadBalancer.ingress..ip}"`
 
 ## Создаем свой helm chart
-Опять ошибка в домашке с out-of-date образами:
-
-v0.3.4
+Опять ошибка в домашке с out-of-date образами: указанный `image: gcr.io/google-samples/microservices-demo/adservice:v0.1.3` отсутствует в реджистри
 
 https://console.cloud.google.com/gcr/images/google-samples/global/microservices-demo/adservice
 
+Его нужно заменить на `v0.3.4` - тогда всё будет работать.
 
-Дефолтно не хватило ресурсов в кластере - пришлось создавать ещё одну воркер ноду.
+
+Несмотря на то, что все объекты предыдущих шагов были удалены, всё равно не хватило ресурсов в кластере - пришлось создавать ещё одну воркер ноду.
+
+> Попробуйте обновить chart и убедиться, что ничего не изменилось
+
+После замены `image: gcr.io/google-samples/microservices-demo/frontend:v0.1.3` на `image: gcr.io/google-samples/microservices-demo/frontend:{{ .Values.image.tag }}`,
+
+и применения `helm upgrade -n hipster-shop frontend frontend/`, ничего не изменилось с точки зрения работы приложения, однако helm всё же пересоздаёт деплоймент. Это важно так как в некоторых случаях это может привести к нежелательным простоям или сбоям.
+
+
 
 ### Создаем свой helm chart | Задание со ⭐
+requirements.yaml - устарел (https://helm.sh/blog/helm-3-preview-pt5/), и так как используется Helm v3, то стоит просто прописать redis как зависимость публичным чартом.
+
+Я использовал чарт из хаба от Bitnami - https://artifacthub.io/packages/helm/bitnami/redis
+
+В values.yaml
+```
+redis:
+  auth.enabled: false
+```
+```
+redis:
+  nameOverride: redis-cart
+  fullnameOverride: redis-cart
+  architecture: standalone
+  auth:
+    enabled: false
+```
+И, так как для изменения имя сервиса, пришлось бы переписывать его (`name: {{ printf "%s-master" (include "common.names.fullname" .) }}`), в all-hipster-shop.yaml
+```
+image: gcr.io/google-samples/microservices-demo/cartservice:v0.1.3
+env:
+- name: REDIS_ADDR
+  value: "redis-cart-master:6379"
+```
+
+### helm-secrets | Необязательное задание
+Переместил секреты в kubernetes-templating/helm-secrets/move-to-frontend-chart, так как без моего ключа установка этого чарта будет вызывать ошибку.
+
+`sudo curl -L -o /usr/local/bin/sops https://github.com/mozilla/sops/releases/download/v3.7.3/sops-v3.7.3.linux.amd64 && chmod +x /usr/local/bin/sops`
+
+`helm plugin install https://github.com/jkroepke/helm-secrets --version v4.2.2`
+
+`gpg --full-generate-key`
+
+Где ID - строчка из шеснадцетиричного числа заглавными буквами.
+
+`sops --encrypt --in-place --pgp <ID> secrets.yaml`
+
+`helm secrets decrypt secrets.yaml` - если нужно посмотреть
+
+
+### Предложите способ использования плагина helm-secrets в CI/CD
+Простейшим способом кажется добавление gpg-ключа в secret variables или аналогичные системы.
+Также можно записать ключ в образ, который будет производить работу с helm в CI.
+
+Чтобы защититься от коммитов секретов в репо можно
+1. В гитигнор добавить расширения RSA и тп
+2. Ключи для подписи и тп класть только в переменные среды - остальное подписывать
+3. Использовать сложные гит хуки или повесить проверку https://github.com/awslabs/git-secrets
+
+## JSONnet Kubecfg (язык шаблонов для json)
+Kubecfg архивирован и переехал:
+https://github.com/vmware-archive/kubecfg#warning-kubecfg-is-no-longer-actively-maintained-by-vmware
+
+Так как используемая в домашнем задании библиотека устарела и для деплоймента имела версию kube api apps/v1beta2, пришлось её обновить до коммита
+https://github.com/bitnami-labs/kube-libsonnet/raw/96b30825c33b7286894c095be19b7b90687b1ede/kube.libsonnet
+
+Итого иморт должен быть: `local kube = import "https://github.com/bitnami-labs/kube-libsonnet/raw/96b30825c33b7286894c095be19b7b90687b1ede/kube.libsonnet"`
+
+
+
+## В манифестах нужно быть предельно внимательным к регистру и к автозаменам.
+Ошибся как всегда на этой игре с именами полей и именами сущностей:
+
+    `{{ if eq .Values.service.type "NodePort" }}nodePort: {{ .Values.service.NodePort }}{{ end }}`
+1. NodePort - spec.type
+1. nodePort - spec.ports
+1. .Values.service.NodePort - ну а это переменная с произвольным именем из values
+
+ПРИЧЁМ! Никакого сообщения не было, так как я ошибся в условии if: `type eq nodePort`, а обнаружил я это случайно, вызвав `get svc` и увидев, что порт не тот, что прописан в values.yaml.
+Коварная штука в общем.
 
 
 
@@ -2747,6 +2904,22 @@ To promote the allocated IP to static, you can update the Service manifest:
 ... and promote the IP to static (promotion works differently for cloudproviders, provided example is for GKE/GCE):
 
 `gcloud compute addresses create ingress-nginx-lb --addresses 104.154.109.191 --region us-central1`
+
+---
+
+## Yaml dot and nested element
+Не стоит забывать, что такая запись:
+```
+redis:
+  auth.enabled: false
+```
+Не равнозначна такой:
+```
+redis:
+  auth:
+    enabled: false
+```
+И, в случае, хелма, например, не не сработает и не вызовет ошибки!
 
 ---
 
