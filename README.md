@@ -374,7 +374,7 @@ spec:
 
 #### Kubelet | AdmissionHandlers, PodSyncHandlers
 1. Проверки Podа на совместимость с текущей версией и конфигурацией Runtime
-  * NoNewPrivileges , sysctl, AppArmor/SELinux профили
+  * NoNewPrivileges, sysctl, AppArmor/SELinux профили
 1. Доступные ресурсы
 * Для подов с гарантированными ресурсами всегда "зеленый свет" 🚦(ресурсы освобождаются потом)
 1. Также kubelet делает периодические проверки запущенных Podов (начиная с момента запуска)
@@ -580,7 +580,7 @@ Ingress и обновляет конфигурацию балансировщи�
 
 **Client** <--https--> **Proxy** <--http--> **Application**
 
-Механизм, при котором запросы снаружи до reverse-proxy идут как обычно шифрованные, но уже от reverse-proxy до приложения идут без шифрования трафика.
+Механизм, при котором запросы снаружи до reverse-proxy идут как обычно шифрованные, но уже от reverse-proxy до приложения идут без шифрования трафика. То есть шифрование "уничтожается" при достижении proxy.
 
 Это позволяет разгрузить сервер приложения и оставить эту работу reverse-proxy севрверу.
 Также, если прокся дешифрует трафик, то она начинает понимать его содержимое, а значит, может баланисровать, кешировать и тп
@@ -1195,6 +1195,993 @@ Flagger implements several deployment strategies (Canary releases, A/B testing, 
 
 Прекрасное описание стретегий развёртывания
 https://docs.flagger.app/usage/deployment-strategies
+
+---
+
+# Homework 5 (Volumes and Persistent storage)
+## Synopsis
+
+Тема огромна - проще прочитать документацию https://kubernetes.io/docs/concepts/storage/.
+
+Чтобы напомнить про сущности, отмечу, что она содержит следующие пункты:
+* Volumes
+* Persistent Volumes
+* Projected Volumes
+* Ephemeral Volumes
+* Storage Classes
+* Dynamic Volume Provisioning
+* Volume Snapshots
+* Volume Snapshot Classes
+* CSI Volume Cloning
+* Storage Capacity
+* Node-specific Volume Limits
+* Volume Health Monitoring
+* Windows Storage
+
+Volume-ы (почти как в docker-е) нужны для 2х вещей:
+1. Чтобы сохранять данные pod-а при рестарте контейнеров в нём. Так как по умолчанию перезапуск происходит начисто.
+2. Чтобы контейнеры внутри pod-а могли совместно использовать файлы
+
+
+
+## Volumes
+**Volume** - абстракция реального хранилища (A directory containing data, accessible to the containers in a pod)
+* Volume создается и удаляется вместе с подом (не экземпляром, а ресурсом)
+* Один и тот же Volume может использоваться одновременно несколькими контейнерами в поде
+Далее все volumes делятся на 2 вида - volume и persistent volume.
+
+Что нужно запомнить про volume-ы (не эфемерные, не персистент и не конфигурационные)
+1. При пересоздании контейнера сохраняются, но при пересоздании pod-а стираются, так как привязаны к нему. Можно сказать объект более низкого уровня вложенности. Типа Deployment > pod > volume
+2. Сначала создаются volume-ы, потом уже поды, к которым они привязаны. Так что пока volume-а не будет, не будет pod-a
+3. A pod can have multiple volumes and each container can mount zero or more of these volumes in different locations and can be of different types
+
+* Persistent - отдельный объект, не связанный с жизненным циклом пода, поэтому устойчивый к любым пересозданиям нагрузок. Pod <--> Volume <--> External Storage
+* Ephemeral - НЕ устойчивы к перезапуску контейнеров. Нужны для расширения лимитов, чаще используются для кеша.
+* Projected - A projected (проецируемые) Одна директория volume mount-а содержит несколько вольюмов-источников разных типов конфигов (secret, downwardAPI, configMap, serviceAccountToken). Удобно для подов, требующих много конфигураций.
+* Ephemeral - НЕ сохраняются при перезапуске контейнеров. Нужны для доп места, чаще под кеш. Может быть многих базовых типов: emptyDir, все volume-ы конфигов, CSI и тп.
+* ConfigMap и Secret и другие конфиги - тоже вольюмы как правило.
+
+Example of using a single volume in two containers are cases where a sidecar container runs a tool that processes or rotates the web server logs or when an init container creates configuration files for the main application container.
+
+### Volume types
+Non-exhaustive (Неисчерпывающий) list of the supported volume types:
+
+* **emptyDir** — A simple directory that allows the pod to store data for the duration of its life cycle. The directory is created just before the pod starts and is initially empty - hence (следовательно) the name. The gitRepo volume, which is now deprecated, is similar, but is initialized by cloning a Git repository. Instead of using a gitRepo volume, it is recommended to use an emptyDir volume and initialize it using an init container.
+* **hostPath** — Used for mounting files from the worker node’s filesystem into the pod.
+* **nfs** — An NFS share mounted into the pod.
+* **cloud disks**: gcePersistentDisk (Google Compute Engine Persistent Disk), awsElasticBlockStore (Amazon Web Services Elastic Block Store), azureFile (Microsoft Azure File Service), azureDisk (Microsoft Azure Data Disk) — Used for mounting cloud provider-specific storage.
+* **Distributed storage**: cephfs, cinder, fc, flexVolume, flocker, glusterfs, iscsi, portworxVolume, quobyte, rbd, scaleIO, storageos, photonPersistentDisk, vsphereVolume — Used for mounting other types of network storage.
+* **configMap**, **secret**, **downwardAPI**, and the **projected** volume type — Special types of volumes used to expose information about the pod and other Kubernetes objects
+through files. They are typically used to configure the application running in the pod.
+* **persistentVolumeClaim** — A portable way to integrate external storage into pods. Instead of pointing directly to an external storage volume, this volume type points to a PersistentVolumeClaim object that points to a PersistentVolume object that finally references the actual storage.
+* **CSI** — A pluggable way of adding storage via the Container Storage Interface. This volume type allows anyone to implement their own storage driver that is then referenced in the csi volume definition. During pod setup, the CSI driver is called to attach the volume to the pod.
+
+
+#### **emptyDir** (Common Volume type)
+Просто пустая директория на хосте ноды, где запущен pod.
+
+* Существует пока pod запущен
+* Изначально создаётся пустой каталог на хосте (Директория типа /var/lib/kubelet/pods/<hash>/volumes)
+* Все контейнеры в поде могут читать и записывать внутри файлы, причём монтирование может быть по разным путям
+* Данные могут храниться в tmpfs (чревато OOM, зато очень быстро)
+
+#### **hostPath** (Common Volume type)
+Существующая директория на хосте ноды, где вызывается.
+
+* Возможность монтировать файл или директорию с хоста
+* Часто используется для служебных сервисов
+    * Node Exporter
+    * Fluentd/Fluent Bit
+    * running cAdvisor in a container; use a hostPath of /sys
+    * running a container that needs access to Docker internals; use a hostPath of /var/lib/docker
+* Scheduler не учитывает hostPath в своих алгоритмах размещения pod-а на ноду
+* Типов монтирования много:
+    * DirectoryOrCreate
+    * Directory
+    * Socket
+    * CharDevice
+    * BlockDevice
+    * FileOrCreate
+    * File
+* Кубер не рекомендует, так как очень небезопасно как с точки зрения привилегий, так и с точки зрения разницы сред
+* На его основе делают множество csi, например persistent Volume provisioner - https://github.com/rancher/local-path-provisioner.
+
+### subPath
+Можно использовать один и тот же вольюм в двух контейнерах, но при этом разбивать его на поддиректории.
+Например все данные приложения для бэкапа хранить в одном вольюме, но по разным маунтпоинтам и путям:
+```
+
+      image: mysql
+      env:
+      - name: MYSQL_ROOT_PASSWORD
+        value: "rootpasswd"
+      volumeMounts:
+      - mountPath: /var/lib/mysql
+        name: site-data
+        subPath: mysql
+    - name: php
+      image: php:7.0-apache
+      volumeMounts:
+      - mountPath: /var/www/html
+        name: site-data
+        subPath: html
+```
+**Kubernetes supports two volumeModes of PersistentVolumes: Filesystem and Block.**
+Их целое множество - cephfs volume, azureFile CSI migration, glusterfs, iscsi, etc.
+
+#### Ephemeral Volumes
+
+Очень узкоспециализированная штука.
+Pod перезапускается - данные не сохраняются.
+
+Полезно для кеширующих серверов и приложений, которые или для каких-нибудь данных только для чтения в виде файлов: ключей или конфигов.
+
+Могут быть видов: emptyDir, configMap, downwardAPI, secret, generic ephemeral volumes и CSI ephemeral volumes с отслеживанием объёма.
+
+Преимущества такого подхода:
+* хранилище может быть локальным, либо подключаемым по сети;
+* тома могут иметь заданный размер, который не может быть превышен приложением;
+* работает с любыми драйверами CSI, поддерживающими предоставление постоянных томов и (для поддержки отслеживания емкости) реализующими вызов GetCapacity;
+* тома могут иметь некоторые начальные данные, зависящие от драйвера и параметров;
+* все типовые операции с томом (создание снимка состояния, изменение размера и т.п.) поддерживаются;
+* тома можно использовать с любым контроллером приложений, принимающим спецификацию модуля или тома;
+* планировщик Kubernetes сам выбирает подходящие узлы, поэтому больше не нужно обеспечивать и настраивать расширения планировщика и изменять webhooks.
+
+Зачем так заморачиваться, а не хранить всё в контейнере, если всё равно сотрётся?
+* Постоянная память в качестве замены оперативной памяти для memcached
+* Локальное хранилище LVM в качестве рабочего пространства
+* Можно создавать предзаполненный volume или CSI клон или копию
+
+#### downwardAPI
+Позволяет контейнерам внутри pod-ов получать информацию о самих себе и своих pod-ах.
+##### Expose Pod Information to Containers Through Files
+There are two ways to expose Pod and Container fields to a running Container:
+* Environment variables
+* Volume Files
+Together, these two ways of exposing Pod and Container fields are called the Downward API.
+
+Downward API volume:
+```
+  volumes:
+    - name: podinfo
+      downwardAPI:
+        items:
+          - path: "labels"
+            fieldRef:
+              fieldPath: metadata.labels
+          - path: "annotations"
+            fieldRef:
+              fieldPath: metadata.annotations
+          - path: "cpu_limit"
+            resourceFieldRef:
+              containerName: client-container
+              resource: limits.cpu
+              divisor: 1m
+```
+```
+cat /etc/podinfo/labels
+
+cluster="test-cluster1"
+rack="rack-22"
+zone="us-est-coast"
+```
+
+
+### Projected volume
+A projected (запланированный или спроецированный?) volume maps several existing volume sources into the same directory.
+
+In 1.26, the following types of volume sources can be projected:
+* secret
+* downwardAPI
+* configMap
+* serviceAccountToken
+
+All sources are required to be in the same namespace as the Pod.
+```
+apiVersion: v1
+kind: Pod
+metadata:
+  name: volume-test
+spec:
+  containers:
+  - name: container-test
+    image: busybox:1.28
+    volumeMounts:
+    - name: all-in-one
+      mountPath: "/projected-volume"
+      readOnly: true
+  volumes:
+  - name: all-in-one
+    projected:
+      sources:
+      - secret:
+          name: mysecret
+          items:
+            - key: username
+              path: my-group/my-username
+      - downwardAPI:
+          items:
+            - path: "labels"
+              fieldRef:
+                fieldPath: metadata.labels
+            - path: "cpu_limit"
+              resourceFieldRef:
+                containerName: container-test
+                resource: limits.cpu
+      - configMap:
+          name: myconfigmap
+          items:
+            - key: config
+              path: my-group/my-config
+```
+
+### local (Static Persistent Local Volume)
+PV являющийся примонтированным локальным хранилищем - директорией, разделом или диском.
+
+Не поддерживает динамический провижининг.
+
+Лучше, чем hostpath, так как не нужно явно указывать привзяку подов к ноде - scheduler сам знает как распределять поды и вольюмы, размещая связанные поды на нодах с local volume-ом.
+
+То есть это более надёжное и гибкое решение, однако, ограниченное тем, что диск физически привязан к хосту ноды и поломка ноды означает поломку работы пода.
+
+## Out-of-tree volume plugins
+Всё это, конечно, не полный список, а с помощью  Container Storage Interface (CSI) и FlexVolume кто угодно может создавать плагины для хранилищ без необходимости менять код кубера.
+
+## The StorageClass Resource
+По факту yaml, похожий на CRD, который просто регистрирует ваше имя класса, связанный с ним плагин провижинера и поля класса, которые могут использовать pod-ы при вызове PVC с этим storage-классом.
+
+Причём и ключи и допустимые значения этих полей мы задаём сами, естесственно.
+Например: `class:nfs  drive_type:nvme`
+
+### Provisioner
+Имя storage plugin-а, который по факту будет выполнять операции с дисками, который привязан к storage class-у.
+
+Есть список встроенных плагинов, но его можно расширять: https://kubernetes.io/docs/concepts/storage/storage-classes/#provisioner
+
+### Allow Volume Expansion
+PersistentVolumes can be configured to be expandable. This feature when set to true, allows the users to resize the volume by editing the corresponding PVC object. Volumes support volume expansion, when the underlying StorageClass has the field allowVolumeExpansion set to true.
+
+## Container Storage Interface (CSI)
+
+Defines a standard interface for container orchestration systems (like Kubernetes) to expose arbitrary storage systems to their container workloads.
+
+Once a CSI compatible volume driver is deployed on a Kubernetes cluster, users may use the csi volume type to attach or mount the volumes exposed by the CSI driver.
+
+A csi volume can be used in a Pod in three different ways:
+
+* through a reference to a PersistentVolumeClaim
+* with a generic ephemeral volume (alpha feature)
+* with a CSI ephemeral volume if the driver supports that (beta feature)
+
+## Persistent Volumes
+* Создаются на уровне кластера
+* PV похожи на обычные Volume, но имеют отдельный от сервисов жизненный цикл
+
+Но их уже нельзя просто "объявить" - нужно реализовать привязку нагрузки к PV через PVC.
+
+Отдельно, стоит выделить local volume - так как он привязывается к ноде. https://kubernetes.io/docs/concepts/storage/_print/#local
+
+## PVC aka persistentVolumeClaim
+Запрос на использование какого-либо PV для POD-а.
+То есть это способ привязки без необходимости углубления в детали конкретной технологии фс и её реализации.
+
+Администратор кластера может ограничить:
+* Количество PVC в неймспейсе
+* Размер хранилища, который может запросить PVC
+* Объем хранилища, который может иметь неймспейс
+
+### Claims As Volumes
+Вообще PVC это отдельный объект и может объявляться в самостоятельных манифестах, однако возможно объявление прямо в pod.spec:
+```
+spec:
+  containers:
+    - name: myfrontend
+      image: nginx
+      volumeMounts:
+      - mountPath: "/var/www/html"
+        name: mypd
+  volumes:
+    - name: mypd
+      persistentVolumeClaim:
+        claimName: myclaim
+```
+### Expanding Persistent Volumes Claims
+Поддержка авторасширения pvc доступна с 1.11 и включена по умолчанию, но работает далеко не со всеми storage class.
+
+You can only expand a PVC if its storage class's allowVolumeExpansion field is set to true.
+### CSI Volume expansion
+То же доступно и для CSI - должно поддерживаться целевым драйвером.
+
+You can only resize volumes containing a file system if the file system is XFS, Ext3, or Ext4.
+
+### PVC & PV lifecycle
+Provisioning > binding > using
+
+Provisioning - статический (выдали все pv заранее и pvc привязывается к существующим) и динамический (реализуется через default storage class - происходит запрос pvc и кластер сам создаёт необходимый PV под его запрос, после чего происходит привязка)
+
+Для следующих этапов есть разные инструменты защиты от переиспользования и перезаписи.
+
+### PV Reclaiming
+PV может иметь несколько разных политик переиспользования ресурсов хранилища:
+* **Retain** - после удаления PVC, PV переходит в состояние “released”, чтобы переиспользовать ресурс, администратор должен вручную удалить PV, освободить место во внешнем хранилище (удалить данные или сделать их резервную копию)
+* **Delete** - (плагин должен поддерживать эту политику) PV удаляется вместе с PVC и высвобождается ресурс во внешнем хранилище
+* **Recycle** (deprecated в пользу dynamic provisioning-а) - удаляет все содержимое PV и делает его доступным для использования
+
+### PV Access Modes
+Тома монтируются к кластеру с помощью различных провайдеров, они имеют различные разрешения доступа чтения/записи, PV дает общие для всех провайдеров режимы.
+PV монтируется на хост с одним их трех режимов доступа:
+* **ReadWriteOnce** - **RWO** - только один узел может монтировать том для чтения и записи. ReadWriteOnce может предоставлять доступ нескольким подам, **если они запущены на одной node-е**.
+* **ReadOnlyMany** - **ROX** - несколько узлов могут монтировать том для чтения
+* **ReadWriteMany** - **RWX** - несколько узлов могут монтировать том для чтения и записи
+* **ReadWriteOncePod** - **RWOP** - Только для единственного pod-а в рамках всего кластера. Поддержка только для CSI k8s 1.22+
+
+### ConfigMap & Secret
+
+Надо отметить, что эти два типа ресурсов так же в основном являются PV, но могут использоваться и в виде переменных.
+
+#### **СonfigMap** - хранят:
+* конфигурацию приложений
+* значения переменных окружения отдельно от конфигурации пода
+* Не шифруются, поэтому для любых приватных данных нужно использовать secret
+
+#### **Secret** - хранят чувствительные данные (возможно шифрование содержимого в etcd, но в манифестах - base64)
+
+You can store secrets in the Kubernetes API and mount them as files for use by pods without coupling to Kubernetes directly. secret volumes are backed by tmpfs (a RAM-backed filesystem) so they are never written to non-volatile storage.
+
+#### ConfigMap & Secret типа функционируют следующим образом:
+1. Сначала создаем соответствующий ресурс (ConfigMap, Secret)
+2. В конфигурации пода в описании volumes или переменных окружения ссылаемся на созданный ресурс
+
+## ConfigMaps
+Нужны, очевидно, чтобы отделять данные от приложения, что полезно для безоапсности и переносимости.
+
+A ConfigMap is an API object used to store non-confidential data in key-value pairs. Pods can consume ConfigMaps as **environment variables, command-line arguments, or as configuration files in a volume**. In addition thereis a crazy way to write code to run inside the Pod that uses the Kubernetes API to read a ConfigMap.
+
+The name of a ConfigMap must be a valid DNS subdomain name.
+
+Mounted ConfigMaps are updated automatically.
+ConfigMaps consumed as environment variables are not updated automatically and require a pod restart.
+
+**Caution**: ConfigMap does not provide secrecy or encryption. If the data you want to store are confidential, use a Secret rather than a ConfigMap, or use additional (third party) tools to keep your data private.
+
+A ConfigMap is not designed to hold large chunks of data. The data stored in a ConfigMap cannot exceed 1 MiB. If you need to store settings that are larger than this limit, you may want to consider mounting a volume or use a separate database or file service.
+
+Unlike most Kubernetes objects that have a spec, a ConfigMap has data and binaryData fields. The data field is designed to contain UTF-8 strings while the binaryData field is designed to contain binary data as base64-encoded strings.
+
+Immutable Secrets and Immutable ConfigMaps - имеют смысл, когда конфигов очень много: защищены от записи и отключают автоматическое слежение за их обновлениями.
+
+## Secret
+
+A Secret is an object that contains a small amount of sensitive data such as a password, a token, or a key.
+
+The name of a Secret object must be a valid DNS subdomain name.
+
+Так же как и ConfigMap-ы:
+1. Ограничены размером в мегабайт
+2. Чаще volume-s, реже - переменные среды для пода.
+
+Kubernetes Secrets are, by default, **stored unencrypted** in the API server's underlying data store (etcd)! In order to safely use Secrets, take at least the following steps - https://kubernetes.io/docs/concepts/security/secrets-good-practices/
+
+Данные для секретов записываются в 2х форматах - `data` и `stringData`.
+data - base64 encoded.
+
+There are 3 main ways for a Pod to use a Secret:
+* As files in a volume mounted on one or more of its containers.
+* As container environment variable.
+* By the kubelet when pulling images for the Pod.
+
+
+
+| Builtin Type | Usage |
+| --- | --- |
+| Opaque (Generic)                      | arbitrary user-defined data |
+| kubernetes.io/service-account-token   | service account token |
+| kubernetes.io/dockercfg               | serialized ~/.dockercfg file |
+| kubernetes.io/dockerconfigjson        | serialized ~/.docker/config.json file |
+| kubernetes.io/basic-auth              | credentials for basic authentication |
+| kubernetes.io/ssh-auth                | credentials for SSH authentication |
+| kubernetes.io/tls                     | data for a TLS client or server |
+| bootstrap.kubernetes.io/token         | bootstrap token data |
+
+Secrets могут быть примонтированы как data volumes или как environment variables, чтобы использоваться контейнером в Pod.
+
+
+## Непрозрачный тип данных - Opaque data type
+
+Opaque - непрозрачный, матовый, мрак.
+
+В информатике непрозрачный тип данных - это тип данных, чья конкретная структура данных не определена в интерфейсе. Это позволяет скрывать информацию, поскольку его значениями можно управлять только путем вызова подпрограмм, которые имеют доступ к недостающей информации. Конкретное представление типа скрыто от пользователей, а видимая реализация является неполной. Тип данных, представление которого является видимым, называется прозрачным. Непрозрачные типы данных часто используются для реализации абстрактных типов данных.
+
+Типичные примеры непрозрачных типов данных включают дескрипторы для ресурсов, предоставляемых операционной системой к прикладному программному обеспечению. Например, стандарт POSIX для потоков определяет API на основе непрозрачных типов, которые представляют потоки или примитивы синхронизации как мьютексы или условные переменные.
+
+Непрозрачный указатель - это особый случай непрозрачного типа данных.
+Это указатель на структуру данных какого-то неопределенного типа.
+Например, стандартная библиотека, которая является частью спецификации языка программирования C, предоставляет функции ввода-вывода для файлов, которые возвращают или принимают значения типа «указатель на FILE», представляющие собой файловые потоки, но конкретная реализация типа FILE является скрытой.
+
+### Opaque in Kubernetes Secrets
+
+Получается, что в случае кубера идея была в том, что создав секрет, получающий из него данные pod, не может получить список всех ключей в нём, но может использовать из него значения, только если точно знает имя ключа.
+
+### Immutable Secrets
+    * protects you from accidental (or unwanted) updates that could cause applications outages
+    * improves performance of your cluster by significantly reducing load on kube-apiserver, by closing watches for secrets marked as immutable.
+
+### Projection of Secret keys to specific paths
+
+Крутая опция, позволяющая выбирать из всех ключей сикрета только определённые и маппить их по разным путям.
+
+You can also control the paths within the volume where Secret keys are projected. You can use the .spec.volumes[].secret.items field to change the target path of each key:
+```
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mypod
+spec:
+  containers:
+  - name: mypod
+    image: redis
+    volumeMounts:
+    - name: foo
+      mountPath: "/etc/foo"
+      readOnly: true
+  volumes:
+  - name: foo
+    secret:
+      secretName: mysecret
+      items:
+      - key: username
+        path: my-group/my-username
+```
+What will happen:
+1. the username key from mysecret is available to the container at the path /etc/foo/my-group/my-username instead of at /etc/foo/username.
+1. the password key from that Secret object is not projected.
+
+### Risks
+  * In the API server, secret data is stored in etcd; therefore:
+    * Administrators should enable encryption at rest for cluster data (requires v1.13 or later).
+    * Administrators should limit access to etcd to admin users.
+    * Administrators may want to wipe/shred disks used by etcd when no longer in use.
+    * If running etcd in a cluster, administrators should make sure to use SSL/TLS for etcd peer-to-peer communication.
+  * If you configure the secret through a manifest (JSON or YAML) file which has the secret data encoded as base64, sharing this file or checking it in to a source repository means the secret is compromised. Base64 encoding is not an encryption method and is considered the same as plain text.
+  * Applications still need to protect the value of secret after reading it from the volume, such as not accidentally logging it or transmitting it to an untrusted party.
+  * A user who can create a Pod that uses a secret can also see the value of that secret. Even if the API server policy does not allow that user to read the Secret, the user could run a Pod which exposes the secret.
+
+
+В общем base64 - это прокатит, если хочется скрыть от беглого взгляда, но лучше шифровать.
+
+#### Container image pull secrets (private image repo access)
+If you want to fetch container images from a private repository, you need a way for the kubelet on each node to authenticate to that repository. You can configure image pull secrets to make this possible. These secrets are configured at the Pod level.
+
+## PVC earning lifecycle
+Стандартный путь:
+1. Создаётся StorageClass, который позволяет привязать реальное хранилище к pv
+2. Создаётся PV
+3. Создаётся PVC пользователем
+4. Кубер находит подходящий под PVC PV
+5. Создаётся POD с volume-ом, который ссылается на PVC
+
+Кстати надо будет руками потом подчищать ненужные PV - это место на всякий случай навсегда занимается.
+### В какой момент происходит монтирование
+1. Kubernetes монтирует сетевой диск на ноду
+2. Runtime пробрасывает том в контейнер
+
+## The StorageClass Resource
+Описание "классов" различных систем хранения
+Разные классы могут использоваться для:
+* Произвольных политик (например переиспользования?)
+* Динамического provisioning
+
+У каждого StorageClass есть provisioner, который определяет какой плагин используется для работы с PVs.
+
+### Provisioner
+Для того, чтобы storage class мог физически управлять выданным ему хранилищем существует Provisioner - т.е. код, который непосредственно отправляет ему вызовы.
+
+## Dynamic Volume Provisioning
+Dynamic volume provisioning allows storage volumes to be created on-demand.
+The implementation of dynamic volume provisioning is based on the API object StorageClass from the API group storage.k8s.io.
+A cluster administrator can define as many StorageClass objects as needed, each specifying a volume plugin (aka provisioner) that provisions a volume and the set of parameters to pass to that provisioner when provisioning.
+
+Важно, что после удаления statefulset-а PVC и PV остались в кластере, пока не удалил PVC руками. Тогда уже и связанный PV удалился, так как был с reclaim политикой Delete:
+
+
+
+#### Resizing a volume containing a file system
+You can only resize volumes containing a file system if the file system is XFS, Ext3, or Ext4 in RWX.
+
+## StatefulSet
+PODы в StatefulSet отличаются от других нагрузок:
+* Каждый под имеет уникальное состояние (имя, сетевой адрес и volume-ы)
+* Так как поды в StatefulSet имеют разное состояние для обеспечения сетевой связности должен использоваться Headless Service
+* Volume-ы для подов должны создаваться через PersistentVolume
+* Для каждого pod-а создается отдельный PVC
+* Удаление/масштабирование подов не удаляет тома, связанные с ними
+* Масштабирование выполняется последовательно: следующий под будет создан только вслед за предыдущим
+* У каждого pod свой pvc и свой pv, поэтому надо пользоваться секцией volume claim template
+* Если pod оказался на авайриной ноде - поведение будет отличаться от поведения в deployment
+* Уникальные, предсказуемые имена pod (app-1, app-2)
+
+Часто сравнивают подходы с репликам и сейтфулсетам как к стаду и к питомцам - в первом случае важно количество и идентичность, во втором - уникальность и качество.
+
+## Local Path Provisioner (local dynamic provisioner)
+Local Path Provisioner provides a way for the Kubernetes users to utilize the local storage in each node. Based on the user configuration, the Local Path Provisioner will create either hostPath or local based persistent volume on the node automatically. It utilizes the features introduced by Kubernetes Local Persistent Volume feature, but makes it a simpler solution than the built-in local volume feature in Kubernetes.
+
+### Immutable Secrets
+    * protects you from accidental (or unwanted) updates that could cause applications outages
+    * improves performance of your cluster by significantly reducing load on kube-apiserver, by closing watches for secrets marked as immutable.
+
+### Risks
+  * In the API server, secret data is stored in etcd; therefore:
+    * Administrators should enable encryption at rest for cluster data (requires v1.13 or later).
+    * Administrators should limit access to etcd to admin users.
+    * Administrators may want to wipe/shred disks used by etcd when no longer in use.
+    * If running etcd in a cluster, administrators should make sure to use SSL/TLS for etcd peer-to-peer communication.
+  * If you configure the secret through a manifest (JSON or YAML) file which has the secret data encoded as base64, sharing this file or checking it in to a source repository means the secret is compromised. Base64 encoding is not an encryption method and is considered the same as plain text.
+  * Applications still need to protect the value of secret after reading it from the volume, such as not accidentally logging it or transmitting it to an untrusted party.
+  * A user who can create a Pod that uses a secret can also see the value of that secret. Even if the API server policy does not allow that user to read the Secret, the user could run a Pod which exposes the secret.
+
+
+В общем base64 - это норм, если хочется скрыть от беглого взгляда, но в идеале, лучше шифровать.
+
+
+### Kubernetes some CSI list
+
+https://github.com/kubernetes-csi/docs/blob/master/book/src/drivers.md
+
+На самом деле важны:
+1. Dynamic provisioning
+1. Лёгкость в обслуживании (реплики, бэкапы, восстановления и тп)
+1. kube-native установка - operator, helm, yaml
+1. POSIX FS (ну когда как)
+1. Snapshots
+1. И другие фишки типа Thin provisioning и т.п.
+
+* https://github.com/longhorn/longhorn - божественно удобный тул, который ставится одним йамлом в т.ч. и даже в установки типа k3s, но требует на ноде драйвера sudo apt-get install -y open-iscsi
+Поддерживает ReadWriteMany, thin-provisioned и тп.
+When the Longhorn Manager is asked to create a volume, it creates a Longhorn Engine instance on the node the volume is attached to, and it creates a replica on each node where a replica will be placed. The Longhorn Engine always runs in the same node as the Pod that uses the Longhorn volume. It synchronously replicates the volume across the multiple replicas stored on multiple nodes.
+* https://github.com/rook/rook - очень страшно тк ceph =), только если установка-поддержка простые, не тюнить глубоко
+* https://github.com/kubernetes-sigs/nfs-ganesha-server-and-external-provisioner - It works just like in-tree dynamic provisioners: a StorageClass object can specify an instance of nfs-ganesha-server-and-external-provisioner to be its provisioner. Then, the instance of nfs-ganesha-server-and-external-provisioner will watch for PersistentVolumeClaims that ask for the StorageClass and automatically create NFS-backed PersistentVolumes for them.
+* https://github.com/seaweedfs/seaweedfs - CSI, мелкий, но перспективный
+* https://github.com/kadalu/kadalu: A lightweight Persistent storage solution for Kubernetes / OpenShift / Nomad using GlusterFS in background.
+* https://github.com/juicedata/juicefs - требует первоначальной настройки внешнего кластера
+* https://github.com/cubeFS/cubefs - замороченно, слишком много ручной работы
+* https://docs.ondat.io/docs/install/kubernetes/ (storageos) - CSI, dynamic, operator требует лицензию даже для бесплатной версии =( b2b
+* https://github.com/quobyte/quobyte-k8s-resources - CSI, operator, dynamic b2b
+* https://github.com/NetApp/beegfs-csi-driver - Ставить тяжко, Dynamic, выглядит как b2b для ML
+## Homework part
+
+### MinIO StatefulSet
+Интересно, что у pvc есть поле status, но остальные статусы отображаются аннотациями
+```
+Annotations:   pv.kubernetes.io/bind-completed: yes
+               pv.kubernetes.io/bound-by-controller: yes
+               volume.beta.kubernetes.io/storage-provisioner: rancher.io/local-path
+               volume.kubernetes.io/selected-node: kind-control-plane
+               volume.kubernetes.io/storage-provisioner: rancher.io/local-path
+Finalizers:    [kubernetes.io/pvc-protection]
+```
+
+Важный момент, что **сначала создаётся PVC, а затем создаётся PV под него в случае динамического провижининга**. При этом сначала даже образ контейнеров пода не пуллится - будет ждать пока либо админ либо провижинер не создадут PV для привязки.
+
+```
+❯ k get ev
+LAST SEEN   TYPE     REASON                  OBJECT                               MESSAGE
+5m21s       Normal   WaitForFirstConsumer    persistentvolumeclaim/data-minio-0   waiting for first consumer to be created before binding
+5m21s       Normal   ExternalProvisioning    persistentvolumeclaim/data-minio-0   waiting for a volume to be created, either by external provisioner "rancher.io/local-path" or manually created by system administrator
+5m21s       Normal   Provisioning            persistentvolumeclaim/data-minio-0   External provisioner is provisioning volume for claim "default/data-minio-0"
+5m19s       Normal   ProvisioningSucceeded   persistentvolumeclaim/data-minio-0   Successfully provisioned volume pvc-f3a65b28-a1ba-4b83-a109-22326015c61f
+5m18s       Normal   Scheduled               pod/minio-0                          Successfully assigned default/minio-0 to kind-control-plane
+5m17s       Normal   Pulling                 pod/minio-0                          Pulling image "minio/minio:RELEASE.2019-07-10T00-34-56Z"
+3m26s       Normal   Pulled                  pod/minio-0                          Successfully pulled image "minio/minio:RELEASE.2019-07-10T00-34-56Z" in 1m51.278097132s
+3m26s       Normal   Created                 pod/minio-0                          Created container minio
+3m26s       Normal   Started                 pod/minio-0                          Started container minio
+5m21s       Normal   SuccessfulCreate        statefulset/minio                    create Claim data-minio-0 Pod minio-0 in StatefulSet minio success
+5m21s       Normal   SuccessfulCreate        statefulset/minio                    create Pod minio-0 in StatefulSet minio successful
+```
+В ДЗ предлагают использовать для просмотра mc, но есть ui, в котором можно работать с бакетами по 9000 порту. Забавно, что он показывает использованное пространство для всего сегмента фс, а не для pvc в 10 гигабайт, который ему по идее должен быть выдан.
+
+
+То есть порядок действий следующий:
+* Создаётся statefulset с MinIO, у которого есть просто volume, в котором он будет хранить данные
+* Вместе с ним создаётся RWO volumeClaim, который запрашивает у дефолтного storage class квоту на pv со storageClass=standard и volumeMode=filesystem, т.е. дефолтные значения
+* А всё потому что в kind-е по умолчанию установлен rancher/local-path-provisioner в одноимённом ns.
+То есть он выдаёт на каждый PVC PV, выделяя целиком (тк лимиты пока игнорирует) `hostPath` диск динамически - очень удобная штука в случае использованя bare-metal и отсутствия network storage.
+
+При этом, если удалить statefulSet, то и pv и pvc останутся, пока pvc не будет удалён вручную.
+
+Примечательно, что директория, в которой находятся загруженные в бакет файлы, находится буквально за 2 команды:
+```
+❯ k describe pv | grep Path
+    Type:          HostPath (bare host directory volume)
+    Path:          /var/local-path-provisioner/pvc-51dd3f17-f33b-4ac4-a959-9d77e6d7368d_default_data-minio-0
+    HostPathType:  DirectoryOrCreate
+```
+и переходя в контейнер kind-а и поддиректорию бакета, который создал из ui:
+```
+root@kind-control-plane:~# ls -lhF /var/local-path-provisioner/pvc-51dd3f17-f33b-4ac4-a959-9d77e6d7368d_default_data-minio-0/bucket/
+total 16M
+-rw-r--r-- 1 root root 16M Dec 15 17:35 Kubernetes_in_Action_Second_Edition_v14.pdf
+```
+### Secret creation
+В нашем случае секретами являются MINIO_ACCESS_KEY и MINIO_SECRET_KEY, которые подтягиваются в приложение как переменные среды, поэтому проще всего поступить так:
+1. **Так как секреты хранятся в base64, используем** `echo -n <var_name> | base64`
+1. Создаём секрет типа opaque, в который кладём эти закодированные переменные
+1. В поде меняем значение на переменную из ключа секрета:
+```
+env:
+  - name: MINIO_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: minio-secret
+        key: MINIO_ACCESS_KEY
+```
+
+
+---
+# Homework 6 (Security and AAAA)
+## The 4C's of Cloud Native Security
+Cloud > Cluster > Container > Code
+
+Each layer of the Cloud Native security model builds upon the next outermost layer. The Code layer benefits from strong base (Cloud, Cluster, Container) security layers. You cannot safeguard against poor security standards in the base layers by addressing security at the Code level.
+
+В данной методологии описаны общие подходы ко всей безопасности инфраструктуры.
+В принципе, её следует брать как гайдлайн и по шагам защищать свою инфраструктуру.
+https://kubernetes.io/docs/concepts/security/overview/
+
+## The 4A's. Security classic AAA + A (4A) in K8s:
+* Authentication (to identify)
+* Authorization (to give permission)
+* Auditing (aka accounting - to log an audit trail)
+* Admission controllers (content of action validation)
+
+На этом и строится основное управление безопасностью
+https://kubernetes.io/docs/concepts/security/controlling-access/
+
+Все управления доступом появились из-за multitenancy.
+Поэтому кубер решил CNI, CSI и CRI сделать заменяемыми, но управления безопасностью спроектировать и сделать самостоятельно, так как лучше знает как в деталях и меньше косяков будет у пользователей.
+
+## Authentication
+
+В Kubernetes API нет как таковых привычных сущностей аккаунтов с паролями или их групп для аутентификации.
+
+Есть следующие сущности:
+
+**Users**
+* Это люди, которые отдают команды кластеру
+* Глобальны в рамках кластера
+* Не управляются из API
+
+**Service Accounts**
+* Привязаны к жизни ресурса или процесса в кластере
+* Локальны в Namespace
+* Управляются из API
+* Привязаны к токену из Secrets, позволяют элементам кластера общаться с API
+
+Всё, что можно делать через serviceAccount нужно делать через него, так как он namespaced, управляется через кластер, срок действия и легче ограничить только нужным функционалом.
+
+Есть такие варианты аутентификации, но в основном используются выделенные:
+* **X509 Client Certs**
+* **Static Token File /Static Password File**
+* **OpenID Connect Tokens**
+* Bootstrap Tokens /Service Account Tokens
+* Webhook Token Authentication
+* Authenticating Proxy
+* Анонимный запрос
+
+## Authorization
+### Namespaces
+Области видимости в кластере - грубо, виртуальные "подкластеры".
+
+Часть api-resources являются namespaced (e.g. Deployment, Service), то есть ограниченнми областью видимости, часть - нет (e.g. PV, ClusterRole)
+
+### Default Service Account
+`Default Service Account` - Создаётся автоматически вместе с namespace-ом, он присваивается новым подам, чтобы они могли обращаться в Kube API.
+Когда создаёшь SA, то для него кубер автоматически создаёт secret, а именно - токен!
+
+
+## Webhook
+На события аудита в кластере можно повесить вебхук, который будет предпринимать какие-то действия связанные с безопасностью.
+
+## ABAC
+
+В подавляющем большинстве случаев используется RBAC, а не ABAC.
+
+Attribute-based access control (ABAC) defines an access control paradigm whereby access rights are granted to users through the use of policies which combine attributes together.
+
+To enable ABAC mode, specify --authorization-policy-file=SOME_FILENAME and --authorization-mode=ABAC on startup.
+
+The file format is one JSON object per line. There should be no enclosing list or map, only one map per line.
+
+Each line is a "policy object", where each such object is a map.
+
+Bob can just read pods in namespace "projectCaribou":
+`{"apiVersion": "abac.authorization.kubernetes.io/v1beta1", "kind": "Policy", "spec": {"user": "bob", "namespace": "projectCaribou", "resource": "pods", "readonly": true}}`
+
+
+### RBAC
+Чтобы использовать RBAC (хороший акроним ККК - кого, как и кто или who whom how (wwhh?)) нужно:
+1. Иметь роль, которая позволяет проводить операции (глаголы) над ресурсами (объектами). **Role/ClusterRole**.
+1. Иметь Субъект (т.е. совершающего действия). Subjects (**users**, **groups**, or **service accounts**)
+1. Связать Роль с Субъектом. **RoleBinding/ClusterRoleBinding** через roleRef.
+
+#### Role and ClusterRole
+`Роль = операция + ресурс`.
+E.g.: Читать эндпоинты, создавать PV и тп.
+
+Когда речь идёт об операциях с ресурсами, стоит вспомнить:
+**CRUDL** - новшество в букве L: create read update delete **list**
+
+Основное - это apiGroups и группы ресурсов, к которым мы даем доступ:
+
+```
+rules:
+- apiGroups: [""] # "" означает apiGroup под именем core или legacy
+  resources: ["pods"]
+  verbs: ["get", "watch", "list"]
+```
+
+В Kubernetes имеются следующие роли по умолчанию:
+
+* view: доступ только для чтения, исключает секреты;
+* edit: перечисленное выше + возможность редактировать большинство ресурсов, исключает роли и привязки ролей;
+* admin: перечисленное выше + возможность управлять ролями и привязками ролей на уровне пространств имен;
+* cluster-admin: все возможные привилегии.
+
+
+#### RoleBinding ClusterRoleBinding
+* RoleBinding - привязка внутри одного namespace
+* ClusterRoleBinding - на весь кластер
+
+В Binding секция roleRef отвечает за привязку.
+
+Если привязать кластерную роль через обычный RoleBinding, то она будет действовать только в рамках неймспейса RoleBinding!
+
+Важно, что в кубере множество механизмов защиты требуют неизменяемости ресурсов.
+Например roleRef - если роль привязал, то всё, роль изменять нельзя, так как очевидно небезопасно:
+```
+After you create a binding, you cannot change the Role or ClusterRole that it refers to. If you try to change a binding's roleRef, you get a validation error. If you do want to change the roleRef for a binding, you need to remove the binding object and create a replacement.
+```
+Т.е. как только у binding-а появились субъекты - нельязя менять роли, которые в связке roleRef перечислены.
+Это связано с тем, что
+1. Неизменность roleRef позволяет управлять только списком субъектов (исполнителей), но не менять права, которые им назначены ролью и binding-ом.
+1. Привязка к другой роли (т.е. другим правам для всей общности субъектов) - это фундаментально другой уровень асбракции. Требование пересоздания binding-а, для изменения связи между субъетом и ролью, гарантирует, что всем субъектам нужна новая роль, а не что права лишним субъектам выдадут случайно.
+
+#### Удобный механизм создания шаблонов ролей
+A RoleBinding can also reference a ClusterRole to grant the permissions defined in that ClusterRole to resources inside the RoleBinding's namespace. This kind of reference lets you define a set of common roles across your cluster, then reuse them within multiple namespaces.
+
+### Пересоздание roleref
+С помощью `kubectl auth reconcile` можно создавать манифесты, которые позволяют пересоздавать привязки, если требуется.
+
+Вопрос - а что тогда с ролью? Её можно менять и это ок, что все субъекты получат другие права на ресурсы?
+Звучит вроде нормально, примерно так, если бы в линуксе группе lol выдали бы права на новую директорию.
+
+Интересно, что есть ClusterRole, но это совсем не значит, что права будут на весь кластер - можно сделать привязку такой роли в пределах одного namespace.
+https://kubernetes.io/docs/reference/access-authn-authz/rbac/#user-facing-roles
+
+При этом, чтобы дать возможность всем service account-ам одного namespace-а права на доступ ко всему кластеру нужно использовать cluser role binding, но с ограничением `kind: Group name: system:serviceaccounts:namespace`.
+
+Роли можно объединять в общности посредством aggregated clusterroles с помощью лейблов: https://kubernetes.io/docs/reference/access-authn-authz/rbac/#aggregated-clusterroles
+
+### rakkess
+Невероятно удобный плагин для krew, строящий матрицу для пользователей и сервисных аккаунтов
+
+`kubectl access-matrix -n my-project-dev --as jean`
+
+https://github.com/corneliusweig/rakkess
+
+## Admission controllers
+Node, ABAC, RBAC и webhook отвечают только за авторизацию операций по отношению к ресурсам, но не за само содержание этих операций.
+
+Поэтому, в довесок к тем 4м способам авторизации, сделали admission controller (контроллер входа, признания, допуска) - грубо говоря контроллер контента.
+
+То есть одно дело пользователь получил доступ к домашней странице на портале, другое - он в поля пытается вписать SQL-инъекцию.
+
+AC может делать две важные функции:
+* Изменять запросы к API (JSON Patch)
+* Пропускать или отклонять запросы к API
+Каждый контроллер может делать обе вещи, если захочет.
+❗ Но сначала отрабатывают мутаторы, изменяющие запросы, а потом - валидаторы на них.
+
+Например, есть такие:
+**NamespaceLifecycle**:
+* Запрещает создавать новые объекты в удаляемых Namespaces
+* Не допускает указания несуществующих Namespaces
+* Не дает удалить системные Namespaces
+
+**ResourceQuota** (ns) ограничивает:
+- кол-во объектов
+- общий объем ресурсов
+- объем дискового пространства для volumes
+
+**LimitRanger** (ns) Возможность принудительно установить ограничения по ресурсам pod-а.
+
+**NodeRestriction** - Ограничивает возможности kubelet по редактированию Node и Pod
+
+**ServiceAccount** - Автоматически подсовывает в Pod необходимые секреты для функционирования Service Accounts
+
+**Mutating + Validating AdmissionWebhook** - Позволяют внешним обработчикам вмешиваться в обработку запросов, идущих через AC
+
+**Node auth** - Авторизация на ноде - полезно например для команды наблюдения, которая собирает часть метрик нужной какой-нибудь группы - аналитики, безопасность. Или например ноды со специальными настройками для БД.
+
+
+## Отличная статья по сертификатам, RBAC и администрированию прав
+Cтатья посвящена тому, как создавать пользователей, используя клиентские сертификаты X.509, и как управлять авторизацией с помощью базовых API-объектов RBAC в Kubernetes. Мы также поговорим о некоторых открытых проектах, упрощающих администрирование кластера: rakkess, kubectl-who-can, rbac-lookup и RBAC Manager.
+
+https://habr.com/ru/company/flant/blog/470503/
+
+### Статья, описывающая реальные пути применения RBAC и IAM в кластере
+https://thenewstack.io/three-realistic-approaches-to-kubernetes-rbac/
+### Утилиты, позволяющие агрегировать и отобразить матрицы прав в кластере
+https://www.freshbrewed.science/k8s-and-krew-rbac-utilities/index.html
+
+## Pod Security Admission controller (Replacer for PodSecurityPolicy)
+
+Kubernetes offers a built-in Pod Security admission controller to enforce the Pod Security Standards. Pod security restrictions are applied at the namespace level when pods are created.
+
+Задаёте полики ограничений для всех подов в неймспейсах и, если они их нарушают, то в зависимости от режима, происходит какое-то событие безопасности - либо отмену действия, либо запись в общий лог, либо просто предупреждение пользователя.
+
+Для более гибкого управления, можно делать исключения для определённых пользователей, неймспейсов или рантайм классов.
+
+Pod Security Standards используются, чтобы определить уровни изоляции pod-ов.
+
+Pod Security Standards определяют три разных политики, что широко закрывают потребности безопасности.
+
+Политики суммируются и варьируются от всеразрешающих до всезапрещающих.
+
+Pod Security admission places requirements on a Pod's Security Context and other related fields in yaml according to the three levels defined by the Pod Security Standards: privileged, baseline, and restricted
+
+Pod Security Admission labels for namespaces
+1. **Privileged** -	Unrestricted policy, providing the widest possible level of permissions. This policy allows for known privilege escalations.
+1. **Baseline** -	Minimally restrictive policy which prevents known privilege escalations. Allows the default (minimally specified) Pod configuration.
+1. **Restricted** -	Heavily restricted policy, following current Pod hardening best practices.
+
+#### Примеры некоторых объектов контроля и режимы исполнения политик:
+* HostProcess
+* HostPath Volumes
+* AppArmor
+* Seccomp
+* Capabilities
+* Host Ports
+* /proc Mount Type
+* https://kubernetes.io/docs/concepts/security/pod-security-standards/
+
+(!) И эта одна из причин почему кубер только на линуксе (не юниксе), так как только в нём есть все эти плюшки с сигруппами, неймспейсами, селинуксами и тп.
+
+**Modes for namespaces:**
+* **enforce**	Policy violations will cause the pod to be rejected.
+* **audit**	Policy violations will trigger the addition of an audit annotation to the event recorded in the audit log, but are otherwise allowed.
+* **warn**	Policy violations will trigger a user-facing warning, but are otherwise allowed.
+
+#### Exemptions
+Allows the creation of pods that would have otherwise been prohibited due to the policy associated with a given namespace. Configured in the Admission Controller configuration.
+
+* **Usernames**: requests from users with an exempt authenticated (or impersonated) username are ignored.
+* **RuntimeClassNames**: pods and workload resources specifying an exempt runtime class name are ignored.
+* **Namespaces**: pods and workload resources in an exempt namespace are ignored.
+
+### Alternative 3rd party policy agents
+
+#### Kyverno open policy agent
+
+Kyverno — решение для автоматизации (policy engine), управления и обеспечения безопасности любой платформы на базе Kubernetes.
+Kyverno работает как динамический контроллер допуска в кластере.
+Он получает от kube-apiserver HTTP-обратные вызовы вебхуков с проверкой и изменением допусков и применяет соответствующие политики для получения результатов, которые обеспечивают соблюдение политик допуска или отклоняют запросы.
+
+Политики Kyverno написаны на родном для Kubernetes языке YAML, что значительно сокращает время обучения, необходимое для написания собственных политик.
+Политики Kyverno могут сопоставлять ресурсы, используя селекторы типа ресурса, имени и метки, чтобы инициировать такие действия, как проверка, изменение, генерация и верификация образа для подписи контейнеров и сертификации цепочки программного обеспечения.
+
+#### Kubewarden
+Kubewarden is a policy engine for Kubernetes. It helps with keeping your Kubernetes clusters secure closed_lock_with_key and compliant heavy_check_mark
+
+Kubewarden policies can be written using regular programming languages or Domain Specific Languages (DSL).
+
+Policies are compiled into WebAssembly modules that are then distributed using traditional container registries.
+
+https://github.com/kubewarden
+
+#### Gatekeeper open policy agent
+Gatekeeper — специфическая реализация Open Policy Agent (OPA) для Kubernetes, которая работает в качестве Webhook для валидации манифестов. Этот инструмент предназначен для аудита и автоматического применения к ресурсам Kubernetes политик безопасности, написанных на языке Rego.
+
+Gatekeeper встраивается между сервером API Kubernetes и OPA, принимает все поступающие в кластер запросы и в реальном времени проверяет их на соответствие предварительно настроенным политикам безопасности. 
+
+https://habr.com/ru/company/vk/blog/669788/
+
+
+## Auditing
+
+Kubernetes auditing provides a security-relevant, chronological set of records documenting the sequence of actions in a cluster. The cluster audits the activities generated by users, by applications that use the Kubernetes API, and by the control plane itself.
+Audit records begin their lifecycle inside the kube-apiserver component. Each request on each stage of its execution generates an audit event, which is then pre-processed according to a certain policy and written to a backend. The policy determines what's recorded and the backends persist the records. The current backend implementations include logs files and webhooks.
+
+https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/
+
+
+### Оффтоп
+Есть 2 балансировщика:
+* Application Layer Balancer (L7)
+* Network Layer Balancer (L4)
+
+Зачем L7 нужен, казалось бы, когда есть более низкоуровневые и более быстрые L4?
+Затем, что данные зашифрованы, а NLB, могут читать только заголовки пакетов, но не данные внутри.
+Вспомнился forward proxy TLS termination с Varnish.
+
+## Homework part
+
+Есть множество предустановленных ролей в кластере, которые можно посмотреть `k get clusterroles`, а потом `describe`. Например для SA PV-провижинера в kind:
+```
+❯ k describe clusterrole local-path-provisioner-role
+Name:         local-path-provisioner-role
+Labels:       <none>
+Annotations:  <none>
+PolicyRule:
+  Resources                      Non-Resource URLs  Resource Names  Verbs
+  ---------                      -----------------  --------------  -----
+  endpoints                      []                 []              [*]
+  persistentvolumes              []                 []              [*]
+  pods                           []                 []              [*]
+  events                         []                 []              [create patch]
+  configmaps                     []                 []              [get list watch]
+  nodes                          []                 []              [get list watch]
+  persistentvolumeclaims         []                 []              [get list watch]
+  storageclasses.storage.k8s.io  []                 []              [get list watch]
+```
+
+Судя по тому, что `Permissions are purely additive (there are no "deny" rules).` - если мы хотим запретить доступ к кластеру, то нужно просто создать пользователя, не давая привязок.
+
+Удостоверился - всё что у него есть такой командой `kubectl access-matrix --as dave`:
+```
+selfsubjectaccessreviews.authorization.k8s.io                       ✔
+selfsubjectrulesreviews.authorization.k8s.io                        ✔
+```
+
+Важно не забывать, что основная игра в гибкости и шаблонизации основана на том, что RoleBinding к ClusterRole всё равно привязан к неймспейсу.
+
+И что у пользователей в subject `apiGroup: rbac.authorization.k8s.io`, а у SA - `namespace` =)
+
+
+
+---
+# Homework 7 (Helm and templating)
+
+
+---
+
+# What is cgroup v2?
+FEATURE STATE: Kubernetes v1.25 [stable]
+
+cgroup v2 is the next version of the Linux cgroup API. cgroup v2 provides a unified control system with enhanced resource management capabilities.
+
+cgroup v2 offers several improvements over cgroup v1, such as the following:
+
+* Single unified hierarchy design in API
+* Safer sub-tree delegation to containers
+* Newer features like Pressure Stall Information (точнее отслеживает информацию о перегрузе железа и позволяет использовать ресурсы почти на 100%, отсекая ненужное и перераспределяя нагрузку)
+* Enhanced resource allocation management and isolation across multiple resources
+    * Unified accounting for different types of memory allocations (network memory, kernel memory, etc)
+    * Accounting for non-immediate resource changes such as page cache write backs
+
+Some Kubernetes features exclusively use cgroup v2 for enhanced resource management and isolation. For example, the MemoryQoS feature improves memory QoS (Quality-of-Service for Memory Resources) and relies on cgroup v2 primitives.
+
+То есть только в v2 cgroup используются и limit и request-ы на память, так как в v1 использовались только limit-ы по факту. И в v1 не было механизма сжатия памяти, в случае, если оно подбиралась к лимиту, что приводило к OOM-ам. (https://kubernetes.io/blog/2021/11/26/qos-memory-resources/)
+
+
+## Config best practice
+Интересный хинт написан тут - https://kubernetes.io/docs/concepts/configuration/overview/#services.
+
+Сказано, что первым лучше создавать сервисы для любого типа workload-а, так как в таком случае при инициализации они сразу подхватят нужные переменные и не будет задержек и race-ов.
+
+Полагаю, что то же самое касается и сикретов с конфиг мапами - они при бутстраппинге будут прокинуты и приложение запустится быстрее и без проблем.
+
+Так что общее правило - сначала всё подготовить для основного объекта, а только потом задеплоить его.
+
+Вообще полезная страница, по ней можно делать финальную сверку своих конфигураций.
+
+
+# Глоссарий Kubernetes-а
+https://kubernetes.io/docs/reference/glossary/?all=true
+# Если нужно найти инструмент для решения какой-то проблемы
+То, в первую очередь нужно поискать его в ландшафте https://landscape.cncf.io/.
+
+Там есть всё, начиная с CNI/CRI/CSI и Service Mesh, заканчивая SAST-ами и Chaos Engineering-ом.
+
 
 
 
