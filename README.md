@@ -99,6 +99,22 @@ If a Pod's init container fails, the kubelet repeatedly restarts that init conta
               command: [ "/bin/bash", "-c", "sleep 5; kill -QUIT 1" ]
 ```
 
+### Resource units in Kubernetes
+Note: If you specify a limit for a resource, but do not specify any request, and no admission-time mechanism has applied a default request for that resource, then Kubernetes copies the limit you specified and uses it as the requested value for the resource.
+
+There are limits also for PID count for POD to consume, storage and so on - https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/.
+#### CPU resource units
+
+Limits and requests for CPU resources are measured in cpu units. In Kubernetes, 1 CPU unit is equivalent to 1 physical CPU core, or 1 virtual core, depending on whether the node is a physical host or a virtual machine running inside a physical machine.
+
+Fractional requests are allowed. When you define a container with spec.containers[].resources.requests.cpu set to 0.5, you are requesting half as much CPU time compared to if you asked for 1.0 CPU. For CPU resource units, the quantity expression 0.1 is equivalent to the expression 100m, which can be read as "one hundred millicpu". Some people say "one hundred millicores", and this is understood to mean the same thing.
+
+#### Memory resource units
+
+Limits and requests for memory are measured in bytes. You can express memory as a plain integer or as a fixed-point number using one of these quantity suffixes: E, P, T, G, M, k. You can also use the power-of-two equivalents: Ei, Pi, Ti, Gi, Mi, Ki. For example, the following represent roughly the same value: `128974848, 129e6, 129M,  128974848000m, 123Mi`
+
+Pay attention to the case of the suffixes. If you request 400m of memory, this is a request for 0.4 bytes. Someone who types that probably meant to ask for 400 mebibytes (400Mi) or 400 megabytes (400M).
+
 ## Задание. Почему обновление ReplicaSet не повлекло обновление запущенных pod?
 
 В нашем случае, replicaset controller следит за тем, чтобы pod-ов, которые попадают в область ответственности контроллера по label-ам, было указанное количество. При этом изменение информации в самих подах не входит в его зону ответственности. А так как подов уже было 3 и их количество не изменилось, то контроллер не предпринял никаких действий.
@@ -1598,6 +1614,28 @@ Opaque - непрозрачный, матовый, мрак.
 Это указатель на структуру данных какого-то неопределенного типа.
 Например, стандартная библиотека, которая является частью спецификации языка программирования C, предоставляет функции ввода-вывода для файлов, которые возвращают или принимают значения типа «указатель на FILE», представляющие собой файловые потоки, но конкретная реализация типа FILE является скрытой.
 
+Также, если открыть Wireshark и посмотреть на содержание фрейма, с запросом к kubectl к api-server, в котором есть данные прикладного уровня, то можно увидеть подобную картину, где данные приложения зашифрованы и называются Opaque Type:
+```
+Frame 27: 577 bytes on wire (4616 bits), 577 bytes captured (4616 bits) on interface wlp2s0, id 0
+Ethernet II, Src: #####, Dst: #####
+Internet Protocol Version 4, Src: #####, Dst: #####
+Transmission Control Protocol, Src Port: 37568, Dst Port: 443, Seq: 352, Ack: 1797, Len: 511
+Transport Layer Security
+    TLSv1.3 Record Layer: Application Data Protocol: http-over-tls
+        Opaque Type: Application Data (23)
+        Version: TLS 1.2 (0x0303)
+        Length: 81
+        Encrypted Application Data: e06d882842c816e3395035ef01a7aab11335d1260b450f11d52776695fe53a9029f36bf2…
+        [Application Data Protocol: http-over-tls]
+    TLSv1.3 Record Layer: Application Data Protocol: http-over-tls
+        Opaque Type: Application Data (23)
+        Version: TLS 1.2 (0x0303)
+        Length: 420
+        Encrypted Application Data: 1d9c6319480e2ddb80c336c82cb60edee0226b4b2872a24be0505e4588bb72ee28be73ac…
+        [Application Data Protocol: http-over-tls]
+```
+
+
 ### Opaque in Kubernetes Secrets
 
 Получается, что в случае кубера идея была в том, что создав секрет, получающий из него данные pod, не может получить список всех ключей в нём, но может использовать из него значения, только если точно знает имя ключа.
@@ -2141,6 +2179,747 @@ selfsubjectrulesreviews.authorization.k8s.io                        ✔
 ---
 # Homework 7 (Helm and templating)
 
+## Helm
+Возможности
+* Упаковка нескольких манифестов Kubernetes в пакет - Chart
+* Установка пакета в Kubernetes (установленный Chart называется Release)
+* Изменение значений переменных во время установки пакета
+* Upgrade (обновления) и Rollback (откаты) установленных пакетов
+* Управление зависимостями между пакетами
+* Xранение пакетов в удаленных репозиториях
+
+Фактически очень гибкий щаблонизатор с широченными возможностями - куча встроенных переменных, возможность получения переменных и шаблонов отовсюду, тесты и тп. Есть опции  `--dry-run --debug`, которые позволяют проверить шаблоны на правильное вычисление значений и тп.
+
+```
+example/
+  Chart.yaml         # описание пакета
+  README.md
+  requirements.yaml  # список зависимостей
+  values.yaml        # переменные
+  charts/            # загруженные зависимости
+  templates/         # шаблоны описания ресурсов Kubernetes
+```
+
+Документация сама является прекрасным пошаговым руководством - https://helm.sh/docs/chart_template_guide/getting_started/
+
+Если подумать, то чарты, однозначно полезнее в случае, когда необходимо заниматься дистрибуцией своего приложения, в то время как управление через GitOps, типа ArgoCD или Flux, гораздо удобнее, когда в этом нет необходимости.
+
+### Встрооенные переменные
+
+* Release - информация об устанавливаемом release
+* Chart - информация о chart, из которого происходит установка
+* Files - возможность загружать в шаблон данные из файлов (например, в configMap )
+* Capabilities - информация о возможностях кластера (например, версия Kubernetes)
+* Templates - информация о манифесте, из которого был создан ресурс
+
+Внутри этих классов могут быть весьма сложные и полезные вроде:
+* `Files.AsSecrets` is a function that returns the file bodies as Base 64 encoded strings.
+* `Capabilities.APIVersions.Has $version` indicates whether a version (e.g., batch/v1) or resource (e.g., apps/v1/Deployment) is available on the cluster.
+
+### Циклы, условия и функции
+В основе Helm лежит шаблонизатор Go с 50+ встроенными функциями.
+
+Например:
+
+**Условия**:
+```
+{{- if .Values.server.persistentVolume.enabled }}
+    persistentVolumeClaim:
+      ...
+{{- else }}
+```
+
+**Циклы**:
+```
+{{- range $key, $value := .Values.server.annotations }}
+  {{ $key: }} {{ $value }}
+{{- end }}
+```
+
+**Операторы сравнения**:
+`eq, ne, lt, gt, and, or ...`
+
+**Printf**:
+```
+name: {{ printf "%s-master" (include "common.names.fullname" .) }}
+---
+common.names.fullname: redis
+---
+name: redis-master
+
+```
+Список большой - https://helm.sh/docs/chart_template_guide/function_list/
+
+### Pipelines
+
+По аналогии с пайпами в unix
+
+One of the powerful features of the template language is its concept of pipelines. Drawing on a concept from UNIX, pipelines are a tool for chaining together a series of template commands to compactly express a series of transformations. In other words, pipelines are an efficient way of getting several things done in sequence.
+
+`drink: {{ .Values.favorite.drink | repeat 5 | quote }}`
+
+приведёт к повторению переменной 5 раз и последующему заключению в кавычки
+
+`drink: "coffeecoffeecoffeecoffeecoffee"`
+
+Ещё есть фунции default и lookup:
+* drink: {{ .Values.favorite.drink | default "tea" | quote }}
+* The `lookup` function can be used to look up resources in a running cluster.  When lookup returns a list of objects, it is possible to access the object list via the items field:
+```
+{{ range $index, $service := (lookup "v1" "Service" "mynamespace" "").items }}
+    {{/* do something with each service */}}
+{{ end }}
+```
+For templates, the operators (eq, ne, lt, gt, and, or and so on) are all implemented as functions. In pipelines, operations can be grouped with parentheses ((, and )).
+
+
+### Hooks
+Определенные действия, выполняемые в различные моменты жизненного цикла поставки. Hook, как правило, запускает Job (но это не обязательно).
+
+Виды hooks:
+* `pre/post-install`
+* `pre/post-delete`
+* `pre/post-upgrade`
+* `pre/post-rollback`
+
+### Использование публичных чартов, но своих переменных
+`helm install chartmuseum chartmuseum/chartmuseum -f kubernetes-templating/chartmuseum/values.yaml --namespace=chartmuseum --create-namespace`
+
+### Поиск по центральному хабу и своим репозиториям
+* `helm search hub` searches the Artifact Hub (like docker hub), which lists helm charts from dozens of different repositories. (e.g. https://artifacthub.io/packages/helm/prometheus-community/kube-prometheus-stack)
+* `helm search repo` searches the repositories that you have added to your local helm client (with `helm repo add`). This search is done over local data, and no public network connection is needed.
+
+### Helm Secrets
+Плагин helm-secrets (https://github.com/jkroepke/helm-secrets) предлагает секретное управление и защиту вашей важной информации. Он делегирует секретное шифрование Mozilla SOPS.
+Ставится самим хелмом в сам хелм и, используя разные механизмы шифрования, может на лету расшифровывать зашифрованные значения в применяемых манифестах или шаблонах.
+
+Важно, что команда в таком случае заменяется с `helm upgrade` на `helm secrets upgrade`.
+
+Шифрование может осуществляться, например находящимися на машине PGP-ключами (например парой RSA), с которой выполняются `helm secrets upgrade` - то есть значения можно пушить в гит, но должна быть доверенная среда исполнения.
+
+* Плагин для Helm
+* Механизм удобного* хранения и деплоя секретов для тех, у кого нет HashiCorp Vault
+* Реализован поверх другого решения - Mozilla Sops (https://github.com/mozilla/sops)
+* Возможность сохранить структуру зашифрованного файла (YAML, JSON, ENV, INI and BINARY)
+* Поддержка PGP и KMS (AWS KMS, GCP KMS, Azure Key Vault, age, and PGP.)
+
+Очень полезная штука, когда нет Vault.
+
+### Best practices
+* В большинстве имён и переменных стоит привязываться не к названию пакета, а к версии релиза
+* Указывайте все используемые в шаблонах переменные в values.yaml, выбирайте адекватные значения по умолчанию
+* Используйте команду helm create для генерации структуры своего chart
+* Пользуйтесь плагином helm docs для документирования своего chart
+
+https://helm.sh/docs/chart_best_practices/
+
+#### Chart, release and some valuable remarks
+**Chart** - пакет, включающий
+* Метаданные
+* Шаблоны описания ресурсов Kubernetes
+* Конфигурация установки (values.yaml)
+* Документация
+* Список зависимостей
+
+**Release**
+* Установленный в Kubernetes Chart
+* Хранятся в configMaps и Secrets
+* Chart + Values = Release
+* 1 Upgrade = 1 Release
+
+A chart can be either an 'application' or a 'library' chart.
+* Application charts are a collection of templates that can be packaged into versioned archives to be deployed.
+* Library charts provide useful utilities or functions for the chart developer. They're included as a dependency of application charts to inject those utilities and functions into the rendering pipeline. Library charts do not define any templates and therefore cannot be deployed.
+
+Для того, чтобы переопределить values для subchart-а необходимо в основном файле values прописать секцию с именем зависимости и в ней переопределить значения.
+
+У чарта могут быть тесты - например connection test после установки.
+Информация, которая выводится в аутпут после установки чарта формируется через NOTES.txt - например, ссылка на внешнее доменное имя, токены доступа и дальнейшие инструкции по конфигурации.
+
+**“.”** означает текущую область значений (current scope), далее идет зарезервированное слово Values и путь до ключа. При рендере релиза сюда подставится значение, которое было определено по этому пути.
+
+### 3-way merge
+Работает Helm 3 следующим образом:
+
+1. **1** Получает на вход Chart (локально или из репозитория, при этом чарты могут использовать друг друга) и генерирует манифест релиза.
+1. **2** Получает текст предыдущего релиза.
+1. **3** Получает текущее стостояние примитивов из namespace-релиза.
+1. Сравнивает эти три вещи, делает patch и передает его в KubeAPI.
+1. Дожидается выката релиза (опциональный шаг).
+
+Эта схема называется 3-way merge. Таким образом Helm приведет конфигурацию приложения к состоянию, которое описано в git, но не тронет другие изменения. Т. е., если у вас в кластере есть какая-то сущность, которая трансформирует ваши примитивы (например, Service Mesh), то Helm отнесется к ним бережно.
+
+### Subcharts
+* A subchart is considered "stand-alone", which means a subchart can never explicitly depend on its parent chart.
+* For that reason, a subchart cannot access the values of its parent.
+* A parent chart can override values for subcharts.
+* Helm has a concept of global values that can be accessed by all charts.
+
+helm upgrade --install hipster-shop kubernetes-templating/hipster-shop --namespace hipster-shop **--set frontend.service.NodePort=31234**
+Так как как мы меняем значение переменной для зависимости - перед названием
+переменной указываем имя (название chart) этой зависимости.
+
+##### Следующая аннотация позволяет развертывать новые Deployments при изменении ConfigMap:
+```
+kind: Deployment
+spec:
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+```
+
+##### Отказ от удаления ресурсов с помощью политик ресурсов (PVC for example):
+```
+metadata:
+  annotations:
+    "helm.sh/resource-policy": keep
+```
+
+## "Sealed Secrets" for Kubernetes by bitnami
+https://github.com/bitnami-labs/sealed-secrets
+
+Encrypt your Secret into a SealedSecret, which is safe to store - even to a public repository. The SealedSecret can be decrypted only by the controller running in the target cluster and nobody else (not even the original author) is able to obtain the original Secret from the SealedSecret.
+
+## Helmfile
+
+* Надстройка над helm - шаблонизатор шаблонизатора.
+* Управление развертыванием нескольких Helm Charts на нескольких окружениях
+* Возможность устанавливать Helm Charts в необходимом порядке
+* Больше шаблонизации, в том числе и в values.yaml
+* Поддержка различных плагинов (helm-tiller, helm-secret, helm-diﬀ)
+* Главное - не увлечься шаблонизацией и сохранять прозрачность решения
+```
+releases:
+- name: prometheus-operator
+  chart: stable/prometheus-operator
+  version: 6.11.0
+  <<: *template
+- name: prometheus-telegram-bot
+  chart: express42/prometheus-telegram-bot
+  version: 0.0.1
+  <<: *template
+...
+    - ./values/{{`{{ .Release.Name }}`}}.yaml.gotmpl
+```
+Отличная статья по использованию helmfile как IaC с разделением окружений https://habr.com/ru/post/491108/ и Ссылка на репо с правильной иерархией директорий - https://github.com/zam-zam/helmfile-examples.
+
+### Божественная фича - возможность накатывать простые yaml манифесты из поддиректорий!
+
+Создаёшь поддиректорию в которой находится нечто, что создаётся вне чартов.
+Например, ClusterIssuer для cert-manager-а и helmfile автоматически его поставит.
+```
+- name: cert-manager-cluster-issuer
+  chart: ./issuer-cr
+```
+### Если важна последовательная установка чартов из манифестов
+`helmfile sync --concurrency=1 ...`
+
+## Jsonnet
+
+* Продукт от Google
+* Расширение JSON (как YAML - нужно помнить, что любой json представим в виде yaml)
+* Любой валидный JSON - валидный Jsonnet (как YAML)
+* Полноценный язык программирования* (заточенный под шаблонизацию) (не как YAML)
+
+### Зачем (в подовляющем большинстве случаев - незачем)
+
+* Для генерации и применения манифестов множества однотипных ресурсов, отличающихся несколькими параметрами
+* Если есть ненависть к YAML, многострочным портянкам на YAML и отступам в YAML
+* Для генерации YAML и передачи его в другие утилиты (например - kubectl):
+* `kubecfg show workers.jsonnet | kubectl apply -f -`
+
+### Kubecfg
+Самый лучший на данный момент тул для работы с Jsonnet-ом.
+
+Позволяет делать шаблоны манифестов в виде json-шаблонов используя библиотеку для интерпретации, например - libsonnet.
+
+Общий workﬂow следующий:
+1. Импортируем подготовленную библиотеку с описанием ресурсов https://github.com/bitnami-labs/kube-libsonnet/blob/v1.19.0/kube.libsonnet
+1. Пишем общий для сервисов шаблон
+1. Наследуемся от шаблона, указывая конкретные параметры
+
+## Kustomize
+
+* Поддержка встроена в kubectl
+* Кастомизация готовых манифестов
+* Все больше приложений начинают использовать kustomize как альтернативный вариант поставки (istio, nginx-ingress, etc...)
+* Почти как Jsonnet, только YAML (но kustomize - это не templating)
+* Нет параметризации при вызове, но можно делать так: `kustomize edit set image ...`
+
+### Общая логика работы:
+1. Создаем базовые манифесты ресурсов
+1. Создаем файл kustomization.yaml с описанием общих значений
+1. Кастомизируем манифесты и применяем их (Можно делать как на лету, так и по очереди)
+1. Отлично подходит для labels , environment variables и много чего еще
+
+## cert-manager
+Интересный инструмент, позволяющий автоматизировать работу с сертификатами.
+Причём провайдерами могут выступать как Let’s Encrypt, HashiCorp Vault и Venafi, так и private PKI.
+
+Туториал для LetsEncrypt + Ingress-Nginx https://cert-manager.io/docs/tutorials/acme/nginx-ingress/.
+
+Другие полезные руководства, включая работу с gcloud, GKE и DNS; Istio; а также локальные варианты - https://cert-manager.io/docs/tutorials/.
+
+Для отладки используется великолепное приложение kuard от создателей книги Kubernetes Up and running, которое позволяет получить исчёрпывающую инфу о кластере и работе сети - https://github.com/kubernetes-up-and-running/kuard.
+
+Тип CRD Issuer определяет как cert-manager будет запрашивать TLS-сертификаты. Важно, что Issuers принадлежат namespace-ам, но есть также ClusterIssuer, который можно установить для всего кластера.
+Подробнее обо всех CRD - https://cert-manager.io/docs/concepts/.
+
+Для того, чтобы с помощью let's encrypt-а можно было получить сертификат, нужно выполнить следующее:
+
+1. Иметь в кластере ingress-контроллер (простейший пример - nginx)
+2. Установить в кластер сам cert-manager и его CRD (ставятся обычно отдельно, но можно и через чарт `--set installCRDs=true`)
+3. Иметь публичное (доступное для LE) доменное имя или зону, которая будет подтверждать сертификат
+4. Создать ingress для целевого сервиса, в котором будут аннотации на эмитента сертификата и блок с секретом tls:
+
+```
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    #cert-manager.io/issuer: "letsencrypt-staging"
+spec:
+  tls:
+  - hosts:
+    - example.example.com
+    secretName: quickstart-example-tls
+```
+5. Дальше работа идёт с 2мя видами эмитентов LE - staging и prod, потому что можно легко выйти за лимиты попыток подтверждения сертификатов у LE и нужно сначала протестировать корректность всей связки.
+
+Создаётся
+```
+   apiVersion: cert-manager.io/v1
+   kind: Issuer
+   metadata:
+     name: letsencrypt-prod
+```
+через который на ингресс и делается фактический запрос у LE.
+
+Важно, что ingress annotation для ClusterIssuer пишется через дефис: `cert-manager.io/cluster-issuer`
+
+6. Deploy a TLS Ingress Resource
+
+Если выполнены все требования, то можно делать запрос на TLS сертификат.
+Для этого существуют 2 способа:
+1. Аннотации в ingress через ingress-shim (который отслеживает все ингрессы в кластере и запрашивает подходящим сертификаты)
+2. Прямое создание ресурса сертификата
+
+Проще первый путь, так как простое раскомментирование строки `#cert-manager.io/issuer: "letsencrypt-staging"` позволяет cert-manager
+* Создать автоматом сертификат
+* Создаст или изменит ingress чтобы использовать его для подтверждения домена (что обычно в html/.well-known/token.html)
+* Подтвердить домен
+* После того как домен подтверждён и выдан, cert-manager создаст и/или обновит секрет в сертификате
+
+Проверяем состояние выдачи `kubectl describe certificate quickstart-example-tls` и сам секрет серта `kubectl describe secret quickstart-example-tls`
+
+#### Cert-manager Debug
+Удобно дебажить делая describe следующим ресурсам, если что-то пошло не так.
+
+```
+❯ k -n harbor describe certificaterequests.cert-manager.io
+Events:
+  Type    Reason           Age    From                                                Message
+  ----    ------           ----   ----                                                -------
+  Normal  cert-manager.io  2m36s  cert-manager-certificaterequests-approver           Certificate request has been approved by cert-manager.io
+  Normal  IssuerNotFound   2m36s  cert-manager-certificaterequests-issuer-vault       Referenced "Issuer" not found: issuer.cert-manager.io "letsencrypt-prod" not found
+```
+После фикса
+```
+❯ k -n harbor get certificates.cert-manager.io
+NAME             READY   SECRET           AGE
+harbor-ingress   True    harbor-ingress   71s
+```
+
+## Homework part
+
+Чтобы для GKE из локального терминала получать креды через `gcloud`, необходимо установить auth-plugin:
+`gcloud components install gke-gcloud-auth-plugin` и `export USE_GKE_GCLOUD_AUTH_PLUGIN=True` (https://cloud.google.com/blog/products/containers-kubernetes/kubectl-auth-changes-in-gke).
+
+После уже можно использовать новую команду без **beta** вида: `gcloud container clusters get-credentials <cluster_name>`
+
+
+Stable helm переехал : https://helm.sh/blog/new-location-stable-incubator-charts/,
+в связи с чем нужна команда `helm repo add stable https://charts.helm.sh/stable`
+
+| Name | Old Location | New Location |
+|------|--------------|--------------|
+|stable|https://kubernetes-charts.storage.googleapis.com | https://charts.helm.sh/stable |
+
+#### **--atomic**
+Самый полезный ключ это `--atomic`: if set, the installation process deletes the installation on failure. The **--wait** flag will be set **automatically** if --atomic is used.
+Он меня спас несколько раз, подчищая за неудавшимися установками хвосты, которые могли бы приводить к конфликтам или мисконфигурациям.
+
+##### Nginx-ingress helm installation
+
+В итоге использовал самую последнюю версию ингресса,
+`helm upgrade --install nginx-ingress ingress-nginx/ingress-nginx --atomic --namespace=nginx-ingress --version=4.4.0`,
+репо, которой взял отсюда: https://kubernetes.github.io/ingress-nginx/deploy/#quick-start.
+
+
+##### Cert-manager helm and CRD installation
+https://github.com/cert-manager/cert-manager/blob/master/deploy/charts/cert-manager/README.template.md
+
+Before installing the chart, you must first install the cert-manager CustomResourceDefinition resources. This is performed in a separate step to allow you to easily uninstall and reinstall cert-manager without deleting your installed custom resources.
+
+CRD содержат сертификаты, CA, заказы сертификатов, типы проверок и тп.
+Именно поэтому, чтобы не относится к релизам и случайно не стирать сертификаты и историю их установка не включа в хелм чарт по умолчаню (To automatically install and manage the CRDs as part of your Helm release, you must add the `--set installCRDs=true` flag to your Helm installation command).
+
+`kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/{{RELEASE_VERSION}}/cert-manager.crds.yaml`
+
+После установки CRD можно устанавливать релиз из чарта.
+
+`helm install cert-manager-{{RELEASE_VERSION}} --namespace cert-manager --version {{RELEASE_VERSION}} jetstack/cert-manager --atomic`
+
+##### A-record IP <---> Domain
+Далее пришлось A-запись, указывающую на адрес в своём DNS-е.
+
+##### Настройка LE как issuer-а
+Automated Certificate Management Environment (ACME) https://cert-manager.io/docs/configuration/acme/ бывают 3х видов, но используются 2:
+1. HTTP01 - создаёт ключ, доступный по http url-у, который будет соответствовать запрашиваемому доменному имени.
+2. DNS01 - нужно добавить ключ в TXT-запись, после чего сервер ACME, сделав lookup,  challenges are completed by providing a computed key that is present at a DNS TXT record.
+
+Так как у LE жёсткие лимиты на количество запросов подтверждения, то необходимо создать 2 CRD Issuer-а - один для тестов, а другой для боевого применения.
+
+Адреса для HTTP01-проверки у Let's Encrypt так и разделяются:
+1. https://acme-staging-v02.api.letsencrypt.org/directory
+2. https://acme-v02.api.letsencrypt.org/directory
+
+```
+spec:
+  acme:
+    # The ACME server URL
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    # Email address used for ACME registration
+    email: some@gmail.com
+    # Name of a secret used to store the ACME account private key
+    privateKeySecretRef:
+      name: letsencrypt-staging
+    # Enable the HTTP-01 challenge provider
+    solvers:
+    - http01:
+        ingress:
+          class:  nginx
+```
+
+После того как Issuer-ы будут созданы, cert-manager будет знать как и куда обращаться за сертификатом и подтверждением того, что доменное имя действительно принадлежит ресурсу.
+
+##### Развёртка Ingress с TLS
+Теперь, наконец, можно запрашивать сертификаты.
+
+Когда у нас есть серт-менеджер, который знает как и куда обращаться, статический айпишник, по которому доступен ингресс-контроллер извне, доменное имя для ингресса с записью для этого айпишника.
+
+Для этого можно использовать 2 способа:
+1. Используя аннотации в ingress через ingress-shim (контоллер cert-manager, следящий за ингрессами, чтобы вязать к ним сертификаты https://cert-manager.io/docs/usage/ingress/)
+2. Напрямую создавать кастом ресурс типа Certificate
+
+Далее мы используем автоматизированный вариант с аннотациями, чтобы ingress-shim создал ресурс сертификата. После его создания cert-manager  обновит или создаст ingress для подтверждения домена. Как только домен будет подтверждён cert-manager создаст secret, который определён в ресурсе certificate.
+То есть ресурс сертификата ссылается на секрет! А внутри самого секрета уже пэйлод сертификата.
+Важно, что имена и ссылки в ингрессах, сертификатах и секретах должны совпадать.
+
+После редактирования cert-manager.io/issuer
+```
+kind: Ingress
+metadata:
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/issuer: "letsencrypt-staging"
+```
+Получаем: `(STAGING) Let's Encrypt` - то есть полный порядок, получили тестовый сертификат от LE, можно запрашивать настоящий через `cert-manager.io/issuer: "letsencrypt-prod"`
+
+```
+❯ k get certificates.cert-manager.io
+NAME                     READY   SECRET                   AGE
+quickstart-example-tls   True    quickstart-example-tls   8m23s
+```
+и в браузере `Verified by: Let's Encrypt`
+
+
+### Chartmuseum
+Чарт устарел и не разрабатывается: его нельзя поставить на кластер 1.22 и выше (https://kubernetes.io/docs/reference/using-api/deprecation-guide/#ingress-v122), не отредактировав исходники, так как он использует неправильные пути к ресурсу ингресса в шаблонах:
+```
+❯ helm upgrade --install chartmuseum stable/chartmuseum --atomic \
+--namespace=chartmuseum \
+--version=2.14.2 \
+-f chartmuseum/values.yaml
+Release "chartmuseum" does not exist. Installing it now.
+WARNING: This chart is deprecated
+Error: unable to build kubernetes objects from release manifest: unable to recognize "": no matches for kind "Ingress" in version "networking.k8s.io/v1beta1"
+```
+
+Для этого приходится откатывать кластер!
+
+### Chartmuseum | Задание со ⭐
+#### Values auth
+Для того, чтобы включить загрузку с помощью логина и пароля:
+```
+env:
+  open:
+  DISABLE_API: false
+  secret:
+    # username for basic http authentication
+    BASIC_AUTH_USER:user
+    # password for basic http authentication
+    BASIC_AUTH_PASS:password
+```
+
+Docs - https://chartmuseum.com/docs/#uploading-a-chart-package
+
+#### Создание чарта
+Осуществляется командой Helm:
+```
+cd mychart/
+helm package .
+```
+Также можно загрузить уже готовый чарт для prometheus-оператора напрямую по URL:
+```
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm pull prometheus-community/kube-prometheus-stack -d ./
+```
+После этого появится файл `kube-prometheus-stack-43.1.1.tgz`
+
+#### Загрузка в chartmuseum
+
+Осуществляется командой:
+`curl -u user:password --data-binary "@kube-prometheus-stack-43.1.1.tgz" https://chartmuseum.35.198.148.234.nip.io/api/charts`
+
+Если же пакет подписан и для него существует provenance file, нужно его загрузить рядом:
+`curl -u user:password --data-binary "@kube-prometheus-stack-43.1.1.tgz.prov" https://chartmuseum.35.198.148.234.nip.io/api/prov`
+
+Можно загрузить одновременно оба файла используя /api/charts и multipart/form-data тип:
+`curl -u user:password -F "chart=@kube-prometheus-stack-43.1.1.tgz" -F "prov=@kube-prometheus-stack-43.1.1.tgz.prov" https://chartmuseum.35.198.148.234.nip.io/api/charts`
+
+Но можно использовать просто helm-push:
+
+`helm push mychart/ chartmuseum`
+
+#### Установка чарта в k8s:
+Add the URL to your ChartMuseum installation to the local repository list:
+
+```
+helm repo add chartmuseum-nip https://chartmuseum.35.198.148.234.nip.io --username=user --password=password
+"chartmuseum-nip" has been added to your repositories
+```
+После этого выполняется поиск по чартам музея:
+
+`helm search repo chartmuseum-nip`
+
+Выбирается нужный и устанавливается:
+`helm install chartmuseum-nip/kube-prometheus-stack`
+
+### Harbor Helm
+Использую новую версию чарта, так как на текущих версиях GKE (kuber 1.24) возникают проблемы с совместимостью:
+https://github.com/goharbor/harbor-helm/tree/v1.10.2
+
+* expose.ingress.hosts.core - меняем на свой адрес
+* expose.ingress.hosts.notary - глушим
+* expose.ingress.className: `"nginx"`
+* expose.ingress.annotations: `cert-manager.io/issuer: "letsencrypt-staging"`
+* persistence.resourcePolicy: "" instead of keep for pvc auto
+* `notary:   enabled: falseremoval`
+
+Важно не забыть установить CR Issuer cert-manager-а в namespace harbor, так как они namespaced, а кластерные до этого не устанавливались!
+
+```
+helm upgrade --install harbor harbor/harbor --create-namespace \
+--atomic \
+--namespace=harbor \
+--version=1.10.2 \
+-f harbor/values.yaml
+```
+Конечно же я получил следующее:
+```
+Events:
+  Type     Reason           Age   From                                          Message
+  ----     ------           ----  ----                                          -------
+  Warning  OrderFailed      12m   cert-manager-certificaterequests-issuer-acme  Failed to wait for order resource "harbor-ingress-zbgnq-3472572959" to become ready: order is in "errored" state: Failed to create Order: 429 urn:ietf:params:acme:error:rateLimited: Error creating new order :: too many certificates already issued for "nip.io". Retry after 2022-12-20T14:00:00Z: see https://letsencrypt.org/docs/rate-limits/
+```
+Поменял на своё доменное имя, предварительно связав IP ингресса с ним, после чего обновил чарт той же командой, что и устанавливал.
+```
+❯ kubectl get secrets -n harbor -l owner=helm
+NAME                           TYPE                 DATA   AGE
+sh.helm.release.v1.harbor.v1   helm.sh/release.v1   1      17m
+sh.helm.release.v1.harbor.v2   helm.sh/release.v1   1      2m47s
+```
+Интересно, что при этом релиз приложения не изменился, но харбор сделал новый релиз, проставив свою версию.
+После этого где-то вылез по таймауту при апгрейде и из-за atomic-а сделал автоматический roll-back.
+Проблема оказалась почему-то в PVC и таймауте привязок, переустановка решила проблему.
+
+### Helmﬁle | Задание со ⭐
+Использую новую версию - https://github.com/helmfile/helmfile/blob/v0.149.0/docs/index.md
+
+Переменные для harbor-а брал отсюда - https://github.com/goharbor/harbor-helm/tree/v1.10.2#configuration
+
+Почему не вшили в cert-manager возможность ставить через helm nginx clusterIssuer-ов опционально, передавая доменное имя и email - неясно.
+
+Решил следующим образом: в helmfile есть возможность накатывать обычные yaml манифесты, если их положить в поддиректорию. Главное, ставить последовательно  `--concurrency 1`, чтобы не было ошибки.
+
+
+```
+- name: cert-manager-cluster-issuer
+  chart: ./issuer-cr
+```
+Интересно, что в качестве источника хелм чарта можно использовать даже гит с указанием ветки
+
+`docker run --rm --net=host -v "${HOME}/.kube:/root/.kube" -v "${HOME}/.config/helm:/root/.config/helm" -v "${PWD}:/wd" --workdir /wd quay.io/roboll/helmfile:helm3-v0.142.0 helmfile sync`
+
+
+Перед установкой, после сборки helmfile, делаю `helmfile lint`, чтобы убедится в доступности всех чартов.
+
+Установка:
+`helmfile sync -f helmfile.yaml --concurrency 1`
+
+После всего стоит проверить, что адрес, который получил ингресс контроллер совпадает с указанным в DNS-записи.
+`k get -n ingress-nginx svc ingress-nginx-controller  -o jsonpath="{.status.loadBalancer.ingress..ip}"`
+
+## Создаем свой helm chart
+Опять ошибка в домашке с out-of-date образами: указанный `image: gcr.io/google-samples/microservices-demo/adservice:v0.1.3` отсутствует в реджистри
+
+https://console.cloud.google.com/gcr/images/google-samples/global/microservices-demo/adservice
+
+Его нужно заменить на `v0.3.4` - тогда всё будет работать.
+
+
+Несмотря на то, что все объекты предыдущих шагов были удалены, всё равно не хватило ресурсов в кластере - пришлось создавать ещё одну воркер ноду.
+
+> Попробуйте обновить chart и убедиться, что ничего не изменилось
+
+После замены `image: gcr.io/google-samples/microservices-demo/frontend:v0.1.3` на `image: gcr.io/google-samples/microservices-demo/frontend:{{ .Values.image.tag }}`,
+
+и применения `helm upgrade -n hipster-shop frontend frontend/`, ничего не изменилось с точки зрения работы приложения, однако helm всё же пересоздаёт деплоймент. Это важно так как в некоторых случаях это может привести к нежелательным простоям или сбоям.
+
+
+
+### Создаем свой helm chart | Задание со ⭐
+requirements.yaml - устарел (https://helm.sh/blog/helm-3-preview-pt5/), и так как используется Helm v3, то стоит просто прописать redis как зависимость публичным чартом.
+
+Я использовал чарт из хаба от Bitnami - https://artifacthub.io/packages/helm/bitnami/redis
+
+В values.yaml
+```
+redis:
+  auth.enabled: false
+```
+```
+redis:
+  nameOverride: redis-cart
+  fullnameOverride: redis-cart
+  architecture: standalone
+  auth:
+    enabled: false
+```
+И, так как для изменения имя сервиса, пришлось бы переписывать его (`name: {{ printf "%s-master" (include "common.names.fullname" .) }}`), в all-hipster-shop.yaml
+```
+image: gcr.io/google-samples/microservices-demo/cartservice:v0.1.3
+env:
+- name: REDIS_ADDR
+  value: "redis-cart-master:6379"
+```
+
+### helm-secrets | Необязательное задание
+Переместил секреты в kubernetes-templating/helm-secrets/move-to-frontend-chart, так как без моего ключа установка этого чарта будет вызывать ошибку.
+
+`sudo curl -L -o /usr/local/bin/sops https://github.com/mozilla/sops/releases/download/v3.7.3/sops-v3.7.3.linux.amd64 && chmod +x /usr/local/bin/sops`
+
+`helm plugin install https://github.com/jkroepke/helm-secrets --version v4.2.2`
+
+`gpg --full-generate-key`
+
+Где ID - строчка из шеснадцетиричного числа заглавными буквами.
+
+`sops --encrypt --in-place --pgp <ID> secrets.yaml`
+
+`helm secrets decrypt secrets.yaml` - если нужно посмотреть
+
+
+### Предложите способ использования плагина helm-secrets в CI/CD
+Простейшим способом кажется добавление gpg-ключа в secret variables или аналогичные системы.
+Также можно записать ключ в образ, который будет производить работу с helm в CI.
+
+Чтобы защититься от коммитов секретов в репо можно
+1. В гитигнор добавить расширения RSA и тп
+2. Ключи для подписи и тп класть только в переменные среды - остальное подписывать
+3. Использовать сложные гит хуки или повесить проверку https://github.com/awslabs/git-secrets
+
+## JSONnet Kubecfg (язык шаблонов для json)
+Kubecfg архивирован и переехал:
+https://github.com/vmware-archive/kubecfg#warning-kubecfg-is-no-longer-actively-maintained-by-vmware
+
+Так как используемая в домашнем задании библиотека устарела и для деплоймента имела версию kube api apps/v1beta2, пришлось её обновить до коммита
+https://github.com/bitnami-labs/kube-libsonnet/raw/96b30825c33b7286894c095be19b7b90687b1ede/kube.libsonnet
+
+Итого иморт должен быть: `local kube = import "https://github.com/bitnami-labs/kube-libsonnet/raw/96b30825c33b7286894c095be19b7b90687b1ede/kube.libsonnet"`
+
+
+
+## В манифестах нужно быть предельно внимательным к регистру и к автозаменам.
+Ошибся как всегда на этой игре с именами полей и именами сущностей:
+
+    `{{ if eq .Values.service.type "NodePort" }}nodePort: {{ .Values.service.NodePort }}{{ end }}`
+1. NodePort - spec.type
+1. nodePort - spec.ports
+1. .Values.service.NodePort - ну а это переменная с произвольным именем из values
+
+ПРИЧЁМ! Никакого сообщения не было, так как я ошибся в условии if: `type eq nodePort`, а обнаружил я это случайно, вызвав `get svc` и увидев, что порт не тот, что прописан в values.yaml.
+Коварная штука в общем.
+
+
+
+## Retrieving data from secrets
+
+В секрете хранится иерархическая структура, легко представима в виде json или в виде yaml.
+
+Поэтому к полям можно получить доступ через встроенный аналог jq в например так:
+`kubectl get secrets/db-user-pass --template={{.data.password}} | base64 --decode` == `kubectl get secret db-user-pass -o jsonpath='{.data.password}' | base64 --decode`
+
+Но так как содержимое секретных полей закодировано в base64, то необходима раскодировка на лету.
+
+Если не хочется мучаться с двойными скобками и именами содержащими точку, то можно выводить в json и обрабатывать реальным jq:
+`k -n harbor get secret letsencrypt-prod -o json | jq -r '.data."tls.key"' | base64 -d`
+
+
+
+## GKE ingress static IP binding
+
+Используются 2 аннотации в описании ингресса - класс и имя статического айпи, которое указывали при его создании.
+
+```
+kind: Ingress
+metadata:
+  name: web-ingress
+  annotations:
+    # This tells Google Cloud to create an External Load Balancer to realize this Ingress
+    kubernetes.io/ingress.class: gce
+    # This enables HTTP connections from Internet clients
+    kubernetes.io/ingress.allow-http: "true"
+    # This tells Google Cloud to associate the External Load Balancer with the static IP which we created earlier
+    kubernetes.io/ingress.global-static-ip-name: web-ip # This is the name of static IP in list
+```
+
+### Promote ephemeral to static IP
+
+To promote the allocated IP to static, you can update the Service manifest:
+
+`kubectl patch svc ingress-nginx-lb -p '{"spec": {"loadBalancerIP": "104.154.109.191"}}'`
+
+... and promote the IP to static (promotion works differently for cloudproviders, provided example is for GKE/GCE):
+
+`gcloud compute addresses create ingress-nginx-lb --addresses 104.154.109.191 --region us-central1`
+
+---
+
+## Yaml dot and nested element
+Не стоит забывать, что такая запись:
+```
+redis:
+  auth.enabled: false
+```
+Не равнозначна такой:
+```
+redis:
+  auth:
+    enabled: false
+```
+И, в случае, хелма, например, не не сработает и не вызовет ошибки!
 
 ---
 
