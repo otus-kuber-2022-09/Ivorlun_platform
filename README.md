@@ -3,6 +3,15 @@ Ivorlun Platform repository
 
 
 # Homework 2 (Intro)
+## Container runtime layers
+Kubernetes consists of multiple components where some are independent and others are stacked together. Looking at the architecture from a container runtime perspective, then there are from the top to the bottom:
+
+1. kube-apiserver: Validates and configures data for the API objects
+1. kubelet: Agent running on each node
+1. CRI runtime: Container Runtime Interface (CRI) compatible container runtime like CRI-O or containerd
+1. OCI runtime: Lower level Open Container Initiative (OCI) runtime like runc or crun
+1. Linux kernel or Microsoft Windows: Underlying operating system
+
 ### Задание. Разберитесь почему все pod в namespace kube-system восстановились после удаления.
 
 
@@ -2851,8 +2860,20 @@ https://github.com/bitnami-labs/kube-libsonnet/raw/96b30825c33b7286894c095be19b7
 
 
 # Homework 8 (Monitoring)
+Почему вообще возникла потребность в смене инструментов мониторинга?
+
+* DevOps culture: До её появления, стандартом было мониторить хосты, сети и сервисы. Однако, сейчас возникла необходимость более простого внедрения инструментария в сами приложения, в связи с необходимостью отслеживания множества продуктовых и других метрик. Данные теперь гораздо многообразнее и доступнее для всех, а не только админов.
+* Containers and Kubernetes: Контейнеры берут числом, конфигурировать постоянно меняющуюся бездну из подобных сущностей, их сетей и тп, классическими подходами не получится.
+
+Отсюда и появляются инструмент предлагающий:
+* pull вместо push
+* плоское key-value хранилище с тэгами, вместо вложенных деревьев
+* простую конфигурацию в виде открытия одного порта с обычным http, вместо агентов
+* человекочитаемые метрики по http
+
 
 ## Prometheus and Grafana
+![Prometheus architecture](https://prometheus.io/assets/architecture.png "Prometheus parts are within orange borders")
 
 Основной сервер Prometheus состоит из 3х частей:
 1. Retrieval - пуллит метрики из exporters или pushgateway-я и складывает в хранилище.
@@ -2861,13 +2882,17 @@ https://github.com/bitnami-labs/kube-libsonnet/raw/96b30825c33b7286894c095be19b7
 
 Объект, который мы мониторим называется target, что логично, и должен иметь /mertrics эндпоинт.
 
-Виды метрик:
+**Виды метрик**:
 1. Counter - How many times X happend
 2. Gauge (Мера, мерило, калбир, лекало) - What is the current value of X now
 3. Hisogram - How long or how big X was during time
 4. Summary - почти никогда не используются, гистограммы предпочтительнее
 
-Exporter - сервис или скрипт, который преобразует метрики от приложений, не поддерживающих отдачу по эндпоинту /metrics в нативном формате, в понятный Prometheus-у образ и открывает их как /metrics.
+**Exporter** - сервис или скрипт, который преобразует метрики от приложений, не поддерживающих отдачу по эндпоинту /metrics в нативном формате, в понятный Prometheus-у образ и открывает их как /metrics.
+
+![Prometheus Exporter](https://sysdig.com/wp-content/uploads/Blog-Kubernetes-Monitoring-with-Prometheus-7-Prometheus-Exporter.png "Prometheus Exporter")
+
+У Sysdig есть реестр большого количества экспортеров в одном месте, чтобы не искать, которые вроде как даже верифицируются - https://promcat.io/.
 
 Поэтому очень популярен вариант с side-car контейнером в виде экспортера - можно в контейнер рядом его положить, дав возможность забирать метрики, не изменяя сам контейрер приложения.
 
@@ -2889,6 +2914,9 @@ Exporter - сервис или скрипт, который преобразуе
 
 В таком случае они по завершению своей работы должны пушить самостоятельно метрики в pushgateway, откуда их будет пуллить Прометей.
 
+#### Alertmanager
+Принимает пуши из Prometheus сервера и генерит по определённым правилам уведомления.
+
 ### Configuration
 Прометей использует yaml в котором определяется откуда, через какие интервалы собирать и по каким правилам оценивать.
 В нём может быть блоки
@@ -2899,10 +2927,12 @@ Exporter - сервис или скрипт, который преобразуе
 У prometheus есть самомониторинг из коробки, так как есть /metrics.
 
 ### PromQL
-Всегда можно попрактиковаться в нём из встроенного UI или из Grafan-ы.
+Если нет готовых конфигов, то запросы нужно создавать во встроенном UI или из Grafan-ы - так как в них есть подсказки, автодополнение и превью графика, иначе можно с ума сойти запоминая все комбинации метрик и функций.
+Главное запомнить некоторые алгоритмы построения.
+
 Пара примеров:
 * http_requests_total{status!~"4.."} - то есть посчитай все запросы, кроме 400-х
-* rate(http_requests_total[5m])[30m:] - оцени количество запросов в течение 5 минут за последние полчаса
+* rate(http_requests_total[5m])[30m:] - оцени количество запросов в течение 5 минут за последние полчаса (пример из лекции, не уверен, что корректный)
 
 #### Functions and arguments
 
@@ -2914,21 +2944,228 @@ The rate() function - per-second average rate of how a value is increasing over 
 
 https://www.metricfire.com/blog/understanding-the-prometheus-rate-function/
 
-### Prom Disadvantage
+### Prometheus autodiscover mechanisms
+The most relevant are:
+
+Consul: A tool for service discovery and configuration. Consul is distributed, highly available, and extremely scalable.
+
+Kubernetes: Kubernetes SD configurations allow retrieving scrape targets from Kubernetes’ REST API, and always stay synchronized with the cluster state.
+
+Prometheus Operator: To automatically generate monitoring target configurations based on familiar Kubernetes label queries.
+
+### The Prometheus operator
+The Prometheus operator includes, but is not limited to, the following features:
+
+* Kubernetes Custom Resources: Use Kubernetes custom resources to deploy and manage Prometheus, Alertmanager, and related components.
+
+* Simplified Deployment Configuration: Configure the fundamentals of Prometheus like versions, persistence, retention policies, and replicas from a native Kubernetes resource.
+
+* Prometheus Target Configuration: Automatically generate monitoring target configurations based on familiar Kubernetes label queries; no need to learn a Prometheus specific configuration language.
+
+
+#### CustomResourceDefinitions
+
+A core feature of the Prometheus Operator is to monitor the Kubernetes API server for changes to specific objects and ensure that the current Prometheus deployments match these objects. The Operator acts on the following custom resource definitions (CRDs):
+
+1. Prometheus, which defines a desired Prometheus deployment.
+
+1. Alertmanager, which defines a desired Alertmanager deployment.
+
+1. ThanosRuler, which defines a desired Thanos Ruler deployment.
+
+1. **ServiceMonitor**, which declaratively specifies how groups of Kubernetes services should be monitored. The Operator automatically generates Prometheus scrape configuration based on the current state of the objects in the API server.
+
+1. **PodMonitor**, which declaratively specifies how group of pods should be monitored. The Operator automatically generates Prometheus scrape configuration based on the current state of the objects in the API server.
+
+1. **Probe**, which declaratively specifies how groups of ingresses or static targets should be monitored. The Operator automatically generates Prometheus scrape configuration based on the definition.
+
+1. **PrometheusRule**, which defines a desired set of Prometheus alerting and/or recording rules. The Operator generates a rule file, which can be used by Prometheus instances.
+
+1. **AlertmanagerConfig**, which declaratively specifies subsections of the Alertmanager configuration, allowing routing of alerts to custom receivers, and setting inhibit rules.
+
+The Prometheus operator automatically detects changes in the Kubernetes API server to any of the above objects, and ensures that matching deployments and configurations are kept in sync.
+
+
+**To prevent invalid** Prometheus alerting and recording rules from causing failures in a deployed Prometheus instance, **an admission webhook is provided** to validate PrometheusRule resources upon initial creation or update.
+
+
+### Discover what to scrap
+In addition to the use of static targets in the prometheus configuration, Prometheus implements a really interesting service discovery in Kubernetes, allowing us to add targets annotating pods or services with these metadata:
+```
+annotations:
+  prometheus.io/port: 9216
+  prometheus.io/scrape: true
+```
+You have to indicate Prometheus to scrape the pod or service and include information of the port exposing metrics.
+
+### Prom Disadvantages
 Так как архитектурно прометеус спроектирован на максимальную отказоустойчивость вне зависимости от инфраструктуры, то у него возникает проблема масштабирования.
 Это может выливаться в то, что для сервера Проеметея нужно будет закладывать лучшие диски и больше вертикальных ресурсов, а также ограничивать метрики.
 
 https://habr.com/ru/company/southbridge/blog/455290/
 
+Элементарная настройка с телеграм ботом:
 https://www.dmosk.ru/miniinstruktions.php?mini=prometheus-stack-docker
 
+
+### Prometheus Operator vs. kube-prometheus
+#### Prometheus Operator
+
+The Prometheus Operator uses Kubernetes custom resources to simplify the deployment and configuration of Prometheus, Alertmanager, and related monitoring components.
+#### kube-prometheus
+
+kube-prometheus provides example configurations for a complete cluster monitoring stack based on Prometheus and the Prometheus Operator. This includes deployment of multiple Prometheus and Alertmanager instances, metrics exporters such as the node_exporter for gathering node metrics, scrape target configuration linking Prometheus to various metrics endpoints, and example alerting rules for notification of potential issues in the cluster.
+
+Components included in this package:
+* The Prometheus Operator
+* Highly available Prometheus
+* Highly available Alertmanager
+* Prometheus node-exporter
+* Prometheus Adapter for Kubernetes Metrics APIs
+* kube-state-metrics
+* Grafana
+
+The prometheus-community/kube-prometheus-stack helm chart provides a similar feature set to kube-prometheus repo. This chart is maintained by the Prometheus community.
+
+
+## Kubernetes Monitoring
+
+Using Kubernetes concepts like the physical host or service port become less relevant. You need to organize monitoring around different groupings like microservice performance (with different pods scattered around multiple nodes), namespace, deployment versions, etc.
+
+Using the label-based data model of Prometheus together with the PromQL, you can easily adapt to these new scopes.
+
+The Kubernetes API and the kube-state-metrics (which natively uses prometheus metrics) solve part of this problem by exposing Kubernetes internal data, such as the number of desired / running replicas in a deployment, unschedulable nodes, etc.
+
+![Kubernetes monitoring with Prometheus: Architecture overview](https://sysdig.com/wp-content/uploads/Blog-Kubernetes-Monitoring-with-Prometheus-4-Architecture-Overview.png "Kubernetes monitoring with Prometheus: Architecture overview")
+
+
+1. The Prometheus servers need as much target auto discovery as possible. There are several options to achieve this:
+    * Prometheus Kubernetes SD (service discovery)
+    * The Prometheus operator and its Custom Resource Definitions
+    * Consul SD
+    * Azure SD for Azure VM
+    * GCE SD for GCP instances
+    * EC2 SD for AWS VM
+    * File SD
+1. Apart from application metrics, we want Prometheus to collect metrics related to the Kubernetes services, nodes, and orchestration status.
+    1. **Node exporter** for the classical sysadmin host-related metrics: **cpu**, **mem**, **network**, **disk**, load, etc.
+    1. **Kube-state-metrics** for orchestration and cluster level metrics: deployments, pod metrics, resource reservation, etc.
+    1. **Kubernetes control plane metrics**: kubelet, etcd, dns, scheduler, api latency and other internal components.
+1. Prometheus can configure rules to trigger alerts using PromQL. alertmanager will be in charge of managing alert notification, grouping, inhibition, etc.
+1. The AlertManager component configures the receivers and gateways to deliver alert notifications.
+1. Grafana can pull metrics from any number of Prometheus servers and display panels and Dashboards.
+
+
+### Kubernetes monitoring components on a Prometheus stack
+
+**Container Metrics**. Kubelet is responsible for creating pod-level cgroups based on the Quality of Service class to which the pod belongs, and passes this as a parent cgroup to the runtime so that it can ensure all resources used by the pod (e.g., pod sandbox, containers) will be charged to the cgroup. Therefore, Kubelet has the ability to track resource usage at the pod level (using the built-in cAdvisor), and the API enhancement focuses on the container-level metrics.
+
+Historically Kubelet relied on the cAdvisor library to retrieve container metrics such as CPU and memory usage. These metrics are then aggregated and exposed through Kubelet's Summary API to consume. Any container runtime (e.g., Docker and Rkt) integrated with Kubernetes needed to add a corresponding package in cAdvisor to support tracking container and image file system metrics.
+
+With CRI being the new abstraction for integration, it was a natural progression to augment CRI to serve container metrics to eliminate a separate integration point.
+
+https://github.com/kubernetes/community/blob/456ca8eddde6b42b1dda1aeca49d03310702ec40/contributors/devel/sig-node/cri-container-stats.md
+
+
+**Kube-state-metrics** is a simple service that listens to the Kubernetes API server and generates metrics about the state of the objects such as deployments, nodes, and pods. It is important to note that kube-state-metrics is just a metrics endpoint. Other entities need to scrape it and provide long term storage (e.g., the Prometheus server).
+
+**Metrics-server** is a cluster-wide aggregator of resource usage data. **The metrics server will only present the last data points and it’s not in charge of long term storage.**
+
+#### Thus:
+* Kube-state metrics are focused on orchestration metadata: deployment, pod, replica status, etc.
+* Metrics-server is focused on implementing the resource metrics API: CPU, file descriptors, memory, request latencies, etc.
+
+
+
+
+### Kubernetes Metrics Server
+
+Metrics Server is a scalable, efficient source of container resource metrics for Kubernetes built-in autoscaling pipelines.
+
+Metrics Server collects resource metrics from Kubelets and exposes them in Kubernetes apiserver through Metrics API for use by Horizontal Pod Autoscaler and Vertical Pod Autoscaler. Metrics API can also be accessed by `kubectl top`, making it easier to debug autoscaling pipelines.
+
+Metrics Server is not meant for non-autoscaling purposes. For example, don't use it to forward metrics to monitoring solutions, or as a source of monitoring solution metrics. In such cases please collect metrics from Kubelet `/metrics/resource` endpoint directly.
+
+Container runtime must implement a container metrics RPCs (CRI) superseeding cAdvisor or have cAdvisor support.
+
+## Подходы к мониторингу
+* The Four Golden Signals
+* The USE Method
+* The RED Method
+
+### The Four Golden Signals
+Подход был озвучен в “SRE Handbook”
+1. Latency — Время необходимое на обслуживание запроса
+1. Traffic — Количество запросов отправляемых на вашу систему, сессий, RPS
+1. Errors — Количество ошибок
+1. Saturation — Насколько полон ваш сервис: т.е. насколько близко исчерпание лимита (множество сервров начинают лагать при достижении, что приводить к цепной реакции замедления или отказа)
+
+### The USE Method
+Подход озвучил Брендан Грэг
+1. Resource - все компоненты физческого/виртуального сервера (CPU, Disk, RAM, etc.)
+1. Utilization - время которое затрачивает ресурс на выполнение задач
+1. Saturation - показатель указывающий на количество тасков которые не могут быть выполнены, при этом попадая в очередь
+1. Errors - количество ошибок
+
+Вообще получается USER, а не USE =)
+
+### The RED Method
+Подход озвучил Том Вилки
+
+The **USE** method is **for resources** and the **RED** method is **for my services**
+1. Rate - количество запросов в секунду
+1. Errors - количество запросов завершившихся с ошибкой
+1. Duration - количество времени которое занимает каждый запрос
+
+## Pre-homework part
+
+Прошёлся по статье https://sysdig.com/blog/kubernetes-monitoring-prometheus/ (заблокирована из РФ) - там есть устаревшие данные, но она очень грамотно методологически написана.
+
+Важно, что ставится не официальный чарт, а коммьюнити, который уже с настройками:
+```
+helm repo add traefik https://traefik.github.io/charts
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm install prometheus prometheus-community/prometheus
+```
+
+В traefik есть возможность включить нативные метрики prometheus-а на автоматически создаваемом отдельном ClusterIP сервисе как раз для CR ServiceMonitor Prometheus Opertator-а:
+```
+helm install traefik traefik/traefik --set metrics.prometheus.service.enabled=true
+```
+После чего можно отредактировать cm prometheus-server, где добавить scrape job-у:
+```
+  - job_name: 'traefik'
+    static_configs:
+    - targets: ['traefik-metrics:9100]
+```
+Можно для другого неймспейса использовать `traefik-metrics.[namespace].svc.cluster.local`.
+
+Config поддерживает кучу директив (https://prometheus.io/docs/prometheus/latest/configuration/configuration/#%3Cscrape_config%3E), вот несколько:
+
+* basic_auth and bearer_token: Можно установить логин-пароль в случае если используется авторизация для доступа к метрикам.
+* kubernetes_sd_configs or consul_sd_configs: позволяет в автоматизированном режиме подтягивать таргет эндпоинты для скриппинга метрик через данные service-discovery. То есть прометеус может обращаться в K8s API, делая describe объектов, а дальше работать в таком формате, например: получил список объектов, выбрал объект, название ноды и лейбл  совпадают - значит скреппим, есть определённый порт эндпоинта - тоже берём и тп.
+* scrape_interval, scrape_limit, scrape_timeout: позволяют балансировать между точностью, надёжностьб и нагрузкой.
+
+Можно также настраивать автомониторинг через SD связки k8s-prom, просто добавляя такие аннотации к объектам и оператор сам будет генерировать конфиг job-ы по указанным путям.
+```
+annotations:
+  prometheus.io/port: 9216
+  prometheus.io/scrape: true
+```
+
+
 ## Homework part
+
+
 
 https://www.youtube.com/watch?v=QoDqxm7ybLc
 
 https://www.cncf.io/blog/2021/10/25/prometheus-definitive-guide-part-iii-prometheus-operator/
 
 https://sysdig.com/blog/kubernetes-monitoring-prometheus-operator-part3/
+
+
 
 
 ---
@@ -3004,6 +3241,26 @@ redis:
 И, в случае, хелма, например, не не сработает и не вызовет ошибки!
 
 ---
+## eBPF
+
+
+---
+## Kubernetes container runtime observability with OpenTelemetry
+
+Kubernetes consists of multiple components where some are independent and others are stacked together. Looking at the architecture from a container runtime perspective, then there are from the top to the bottom:
+
+1. kube-apiserver: Validates and configures data for the API objects
+1. kubelet: Agent running on each node
+1. CRI runtime: Container Runtime Interface (CRI) compatible container runtime like CRI-O or containerd
+1. OCI runtime: Lower level Open Container Initiative (OCI) runtime like runc or crun
+1. Linux kernel or Microsoft Windows: Underlying operating system
+
+Even if we know the component which seems to cause the issue, we still have to take the others into account to maintain a mental timeline of events which are going on. How do we achieve that? Well, most folks will probably stick to scraping logs, filtering them and **assembling them together over the components borders**. We also have metrics, right? Correct, but bringing metrics values in correlation with plain logs makes it even harder to track what is going on. Some metrics are also not made for debugging purposes. They have been defined based on the end user perspective of the cluster for linking usable alerts and not for developers debugging a cluster setup.
+
+OpenTelemetry to the rescue: the project aims to combine signals such as traces, metrics and logs together to maintain the right viewport on the cluster state.
+
+https://kubernetes.io/blog/2022/12/01/runtime-observability-opentelemetry/
+---
 
 # What is cgroup v2?
 FEATURE STATE: Kubernetes v1.25 [stable]
@@ -3038,6 +3295,13 @@ Some Kubernetes features exclusively use cgroup v2 for enhanced resource managem
 
 # Глоссарий Kubernetes-а
 https://kubernetes.io/docs/reference/glossary/?all=true
+
+### kube-state-metrics (KSM)
+Kube-state-metrics (KSM) is a simple service that listens to the Kubernetes API server and generates metrics about the state of the objects. (See examples in the Metrics section below.) It is not focused on the health of the individual Kubernetes components, but rather on the health of the various objects inside, such as deployments, nodes and pods.
+
+### cAdvisor
+cAdvisor (Container Advisor) provides container users an understanding of the resource usage and performance characteristics of their running containers. It is a running daemon that collects, aggregates, processes, and exports information about running containers. Specifically, for each container it keeps resource isolation parameters, historical resource usage, histograms of complete historical resource usage and network statistics. This data is exported by container and machine-wide.
+
 # Если нужно найти инструмент для решения какой-то проблемы
 То, в первую очередь нужно поискать его в ландшафте https://landscape.cncf.io/.
 
