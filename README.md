@@ -2896,6 +2896,8 @@ https://github.com/bitnami-labs/kube-libsonnet/raw/96b30825c33b7286894c095be19b7
 
 Поэтому очень популярен вариант с side-car контейнером в виде экспортера - можно в контейнер рядом его положить, дав возможность забирать метрики, не изменяя сам контейрер приложения.
 
+Node exporter собирает метрики с помощью DaemonSet-а, чтобы автоматически масштабироваться на новые ноды.
+
 Если хочется нативно отдавать метрики без экспортера, то нужно использовать библиотеки для своего языка при разработке.
 
 Почему pull модель хороша впротивовес push (New relic, Cloud watch) в случае контейнеров и микросервисов?
@@ -3075,8 +3077,13 @@ https://github.com/kubernetes/community/blob/456ca8eddde6b42b1dda1aeca49d0331070
 * Kube-state metrics are focused on orchestration metadata: deployment, pod, replica status, etc.
 * Metrics-server is focused on implementing the resource metrics API: CPU, file descriptors, memory, request latencies, etc.
 
+### KSM vs KMS
 
+* KSM aka kube-state-metrics - специализируется на здоровом состоянии всех оркестрируемых объектов K8s, слушая для этого K8s API. Но не отслеживает метрики приложений K8s типа dns, etcd и тп.
+* KMS aka kubernetes metrics server - сделан для горизонтального и вертикального автоскейлинга и отслеживает гораздом меньше: только утилизацию объектов.
 
+Metrics Server exposes statistics about the resource utilization of Kubernetes objects, whereas kube-state-metrics listens to the Kubernetes API and generates metrics about the state of Kubernetes objects: node status, node capacity (CPU and memory), number of desired/available/unavailable/updated replicas per Deployment, pod status (e.g., waiting, running, ready), and so on.
+kube-state-metrics exposes metrics for all sorts of Kubernetes objects. metrics-server only exposes very few metrics to Kubernetes itself (not scrapable directly with Prometheus), like node & pod utilization.
 
 ### Kubernetes Metrics Server
 
