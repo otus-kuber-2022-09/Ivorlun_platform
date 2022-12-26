@@ -1,6 +1,10 @@
 # Ivorlun_platform
 Ivorlun Platform repository
 
+# Homework 1
+Превосходные диаграммы, позволяющие систематизировать представления о Kubernetes.
+
+https://shipit.dev/posts/kubernetes-overview-diagrams.html
 
 # Homework 2 (Intro)
 ## Container runtime layers
@@ -2862,7 +2866,7 @@ https://github.com/bitnami-labs/kube-libsonnet/raw/96b30825c33b7286894c095be19b7
 # Homework 8 (Monitoring)
 Почему вообще возникла потребность в смене инструментов мониторинга?
 
-* DevOps culture: До её появления, стандартом было мониторить хосты, сети и сервисы. Однако, сейчас возникла необходимость более простого внедрения инструментария в сами приложения, в связи с необходимостью отслеживания множества продуктовых и других метрик. Данные теперь гораздо многообразнее и доступнее для всех, а не только админов.
+* DevOps culture: До её появления, стандартом было мониторить хосты, сети и сервисы. Однако, сейчас возникла необходимость более простого внедрения инструментария в сами приложения, в связи с необходимостью отслеживания множества продуктовых и других метрик. Данные теперь гораздо многообразнее и доступнее для всех, а не только для админов.
 * Containers and Kubernetes: Контейнеры берут числом, конфигурировать постоянно меняющуюся бездну из подобных сущностей, их сетей и тп, классическими подходами не получится.
 
 Отсюда и появляются инструмент предлагающий:
@@ -2876,17 +2880,17 @@ https://github.com/bitnami-labs/kube-libsonnet/raw/96b30825c33b7286894c095be19b7
 ![Prometheus architecture](https://prometheus.io/assets/architecture.png "Prometheus parts are within orange borders")
 
 Основной сервер Prometheus состоит из 3х частей:
-1. Retrieval - пуллит метрики из exporters или pushgateway-я и складывает в хранилище.
+1. Retrieval - пуллит метрики из exporters или Pushgateway-я (если приложение может только пушить) и складывает в хранилище.
 2. TSDB Storage - пишет на любое хранилище
 3. HTTP-server - API, отвечающее на PromQL запросы (Grafana, PrometheusUI), вытаскивая данные из хранилища. Может так же отправлять запросы в AlertManager, интегрирующийся с любыми уведомленями.
 
-Объект, который мы мониторим называется target, что логично, и должен иметь /mertrics эндпоинт.
+Объект, который мониторим - называется target, что логично, и должен иметь /mertrics эндпоинт.
 
 **Виды метрик**:
 1. Counter - How many times X happend
 2. Gauge (Мера, мерило, калбир, лекало) - What is the current value of X now
 3. Hisogram - How long or how big X was during time
-4. Summary - почти никогда не используются, гистограммы предпочтительнее
+4. Summary - редко используются, гистограммы предпочтительнее
 
 **Exporter** - сервис или скрипт, который преобразует метрики от приложений, не поддерживающих отдачу по эндпоинту /metrics в нативном формате, в понятный Prometheus-у образ и открывает их как /metrics.
 
@@ -2900,7 +2904,7 @@ Node exporter собирает метрики с помощью DaemonSet-а, ч
 
 Если хочется нативно отдавать метрики без экспортера, то нужно использовать библиотеки для своего языка при разработке.
 
-Почему pull модель хороша впротивовес push (New relic, Cloud watch) в случае контейнеров и микросервисов?
+Почему pull модель хороша в противовес push (New relic, Cloud watch) в случае контейнеров и микросервисов?
 
 Модель лишена следующих недостатков. Если каждый контейнер будет делать пуш - то:
 1. Появится доп нагрузка на CPU/RAM, которая в масштабе микросервисов даст большой оверхед
@@ -2919,14 +2923,17 @@ Node exporter собирает метрики с помощью DaemonSet-а, ч
 #### Alertmanager
 Принимает пуши из Prometheus сервера и генерит по определённым правилам уведомления.
 
+Интегрируется практически с чем угодно.
+
 ### Configuration
-Прометей использует yaml в котором определяется откуда, через какие интервалы собирать и по каким правилам оценивать.
-В нём может быть блоки
+Прометей использует yaml в котором определяется откуда, через какие интервалы собирать и по каким правилам оценивать метрики.
+
+В нём могут быть блоки:
 * global - глобальные конфиги. Например, evaluation_interval - который определяет как часто метрики оцениваются с точки зрения правил rules.
 * rule_files - как именно собираем метрики и как генерим алерты
 * scrape_configs - какие ресурсы мы мониторим
 
-У prometheus есть самомониторинг из коробки, так как есть /metrics.
+У prometheus есть самомониторинг из коробки, так как есть эндпоинт /metrics.
 
 ### PromQL
 Если нет готовых конфигов, то запросы нужно создавать во встроенном UI или из Grafan-ы - так как в них есть подсказки, автодополнение и превью графика, иначе можно с ума сойти запоминая все комбинации метрик и функций.
@@ -2938,13 +2945,18 @@ Node exporter собирает метрики с помощью DaemonSet-а, ч
 
 #### Functions and arguments
 
-There are two types of arguments in PromQL: range vectors (разамзанный во времени) and instant vectors (мгновенный вектор).
+В PromQL 3 бывает 3 вида аргументов:
+1. Instant vector - a set of time series containing a single sample for each time series, all sharing the same timestamp (грубо - мгновенный вектор)
+1. Range vector - a set of time series containing a range of data points over time for each time series (то есть разамзанный во времени)
+2. Scalar - a simple numeric floating point value
 
 Функций много - https://prometheus.io/docs/prometheus/latest/querying/functions/.
 
 The rate() function - per-second average rate of how a value is increasing over a period of time
 
 https://www.metricfire.com/blog/understanding-the-prometheus-rate-function/
+
+Так же присутствует множество встроенных математических и логических операторов.
 
 ### Prometheus autodiscover mechanisms
 The most relevant are:
@@ -3008,6 +3020,61 @@ https://habr.com/ru/company/southbridge/blog/455290/
 
 Элементарная настройка с телеграм ботом:
 https://www.dmosk.ru/miniinstruktions.php?mini=prometheus-stack-docker
+
+### AlertManager
+
+Алертинг состоит из двух частей в Prometheus
+1. Условие alert-а, которое описано в виде PromQL на Prometheus servers: таргет и правило
+2. Компонент AlertManager, который получает сообщения и дальше решает, что с ними делать на основе их метаданных (лейблов) - отправить ли дальше и кому или заглушить. При этом AlertManager может масштабироваться горизонтально с минимальной конфигурацией.
+
+Prometheus alerting rule example:
+```
+groups:
+- name: etcd
+  rules:
+  - alert: NoLeader
+    expr: etcd_server_has_leader{job="kube-etcd"} == 0
+    for: 1m
+    labels:
+      severity: critical
+      k8s-component: etcd
+    annotations:
+      description: etcd member {{ $labels.instance }} has no leader
+      summary: etcd member has no leader
+```
+
+Like metrics endpoints, AlertManager services can also be autodetected using different methods: DNS discovery, Consul, etc…
+```
+alerting:
+  alertmanagers:
+  - scheme: http
+    static_configs:
+    - targets:
+       - "alertmanager-service:9093"
+```
+
+* The AlertManager groups the different alerts based on their labels and origin
+  * This grouping and hierarchy form the “routing tree”. A decision tree that determines which actions to take.
+    * For example, you can configure your routing tree so every alert with the label k8s-cluster-component gets mailed to the “cluster-admin” mail address.
+* Using Inhibition rules, an alert or group of alerts can be inhibited if another alert is firing.
+  * For example if a cluster is down and completely unreachable, then there is no point notifying the status of the individual microservices it contains.
+* Alerts can be forwarded to ‘receivers’, this is, notification gateways like Slack, email, PagerDuty, webhook, etc.
+
+```
+global:
+  resolve_timeout: 5m
+route:
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'sysdig-test'
+receivers:
+  - name: 'sysdig-test'
+    webhook_configs:
+    - url: 'https://webhook.site/8ce276c4-40b5-4531-b4cf-5490d6ed83ae'
+```
+
 
 
 ### Prometheus Operator vs. kube-prometheus
@@ -3080,7 +3147,7 @@ https://github.com/kubernetes/community/blob/456ca8eddde6b42b1dda1aeca49d0331070
 ### KSM vs KMS
 
 * KSM aka kube-state-metrics - специализируется на здоровом состоянии всех оркестрируемых объектов K8s, слушая для этого K8s API. Но не отслеживает метрики приложений K8s типа dns, etcd и тп.
-* KMS aka kubernetes metrics server - сделан для горизонтального и вертикального автоскейлинга и отслеживает гораздом меньше: только утилизацию объектов.
+* KMS aka kubernetes metrics server - сделан для горизонтального и вертикального автоскейлинга и отслеживает гораздо меньше: только утилизацию объектов.
 
 Metrics Server exposes statistics about the resource utilization of Kubernetes objects, whereas kube-state-metrics listens to the Kubernetes API and generates metrics about the state of Kubernetes objects: node status, node capacity (CPU and memory), number of desired/available/unavailable/updated replicas per Deployment, pod status (e.g., waiting, running, ready), and so on.
 kube-state-metrics exposes metrics for all sorts of Kubernetes objects. metrics-server only exposes very few metrics to Kubernetes itself (not scrapable directly with Prometheus), like node & pod utilization.
@@ -3094,6 +3161,25 @@ Metrics Server collects resource metrics from Kubelets and exposes them in Kuber
 Metrics Server is not meant for non-autoscaling purposes. For example, don't use it to forward metrics to monitoring solutions, or as a source of monitoring solution metrics. In such cases please collect metrics from Kubelet `/metrics/resource` endpoint directly.
 
 Container runtime must implement a container metrics RPCs (CRI) superseeding cAdvisor or have cAdvisor support.
+
+### Control Plane monitoring
+
+![Kubernetes Architecture](https://sysdig.com/wp-content/uploads/Blog-Kubernetes-Monitoring-with-Prometheus-11-Monitoring-Kubernetes-Control-Plane-with-Prometheus.png "What to monitor in Kubernetes")
+
+Мониторинг Control Plane - от него зависит работоспособность всего кластера.
+При этом компоненты Control Plane зачастую слушают только на localhost-е и не имеют сервисов ClusterIP для подключения к себе.
+Поэтому для мониторинга Control Plane:
+1. Доступ открывать к ним не только с localhost-а.
+1. Сервисы, соединяющие с подамми нужно создавать
+
+Есть цикл статей посвящённый каждому компоненту:
+* [How to monitor Kubernetes apiserver](https://sysdig.com/blog/monitor-kubernetes-api-server/)
+* [How to monitor kubelet](https://sysdig.com/blog/how-to-monitor-kubelet/)
+* [How to monitor etcd](https://sysdig.com/blog/monitor-etcd/)
+* [How to monitor controller-manager](https://sysdig.com/blog/how-to-monitor-kube-controller-manager/)
+* [How to monitor kube-proxy](https://sysdig.com/blog/monitor-kube-proxy/)
+* [How to monitor kube-dns](https://sysdig.com/blog/how-to-monitor-coredns/)
+
 
 ## Подходы к мониторингу
 * The Four Golden Signals
@@ -3119,11 +3205,12 @@ Container runtime must implement a container metrics RPCs (CRI) superseeding cAd
 ### The RED Method
 Подход озвучил Том Вилки
 
-The **USE** method is **for resources** and the **RED** method is **for my services**
 1. Rate - количество запросов в секунду
 1. Errors - количество запросов завершившихся с ошибкой
 1. Duration - количество времени которое занимает каждый запрос
 
+The **USE** method is **for resources** and the **RED** method is **for my services**.
+Что логично, так как utilization и stauration - относится как правило к HW части, а в приложении за перформанс отвечает скорее duration-rps связка.
 ## Pre-homework part
 
 Прошёлся по статье https://sysdig.com/blog/kubernetes-monitoring-prometheus/ (заблокирована из РФ) - там есть устаревшие данные, но она очень грамотно методологически написана.
@@ -3249,7 +3336,9 @@ redis:
 
 ---
 ## eBPF
+![eBPF](https://www.brendangregg.com/eBPF/linux_ebpf_internals.png "eBPF")
 
+https://www.brendangregg.com/ebpf.html
 
 ---
 ## Kubernetes container runtime observability with OpenTelemetry
@@ -3269,7 +3358,59 @@ OpenTelemetry to the rescue: the project aims to combine signals such as traces,
 https://kubernetes.io/blog/2022/12/01/runtime-observability-opentelemetry/
 ---
 
-# What is cgroup v2?
+# Namespaces (and cgroups)
+
+
+1. **Mount (mnt)** - Mount namespaces control mount points. Upon creation the mounts from the current mount namespace are copied to the new namespace, but mount points created afterwards do not propagate between namespaces (using shared subtrees, it is possible to propagate mount points between namespaces).
+1. **Process ID (pid)** - The PID namespace provides processes with an independent set of process IDs (PIDs) from other namespaces. PID namespaces are nested.
+1. **Network (net)** - Network namespaces virtualize the network stack. On creation a network namespace contains only a loopback interface. Each network interface (physical or virtual) is present in exactly 1 namespace and can be moved between namespaces.
+1. **Interprocess Communication (ipc)** - IPC namespaces isolate processes from SysV style inter-process communication. This prevents processes in different IPC namespaces from using, for example, the SHM family of functions to establish a range of shared memory between the two processes. Instead each process will be able to use the same identifiers for a shared memory region and produce two such distinct regions.
+1. **UTS** - UTS (UNIX Time-Sharing) namespaces allow a single system to appear to have different host and domain names to different processes. When a process creates a new UTS namespace ... the hostname and domain of the new UTS namespace are copied from the corresponding values in the caller's UTS namespace.
+1. **User ID (user)** - User namespaces are a feature to provide both privilege isolation and user identification segregation across multiple sets of processes available
+1. **Control group (cgroup) Namespace** - hides the identity of the control group of which process is a member. A process in such a namespace, checking which control group any process is part of, would see a path that is actually relative to the control group set at creation time, hiding its true control group position and identity.
+1. **Time Namespace** - allows processes to see different system times in a way similar to the UTS namespace.
+
+
+---
+
+# What is cgroup?
+
+Сигруппы - что можем использовать, неймспейсы, что можем видеть. (c)
+
+Croup (aka control group) - механизм иерархической организации процессов и управлением ресурсов для этих процессов согласно этой иерархии.
+Может использоваться для управления процессами и потоками и другими связанными сущностями типа vCPU, container-ов.
+
+Как правило используется для наложения ограничений на количество тактов процессора, ядер, памяти, ширины сетевого канала, записи на диск и другого, для процессов.
+
+Работает на всех архитектурах процессоров.
+
+Архитектура состоит из 2х частей:
+1. ядра cgroup - отвечает за создание и поддержку иерархии (интегрировано с eBPF btw)
+1. контроллеров - отвечают за типы ресурсов в иерархии
+
+Cgroup-а представляет собой иерархическую фс, примонтированную в `/sys/fs/cgroup`:
+
+
+* blkio — устанавливает лимиты на чтение и запись с блочных устройств;
+* cpuacct — генерирует отчёты об использовании ресурсов процессора;
+* cpu — обеспечивает доступ процессов в рамках контрольной группы к CPU;
+* cpuset — распределяет задачи в рамках контрольной группы между процессорными ядрами;
+* devices — разрешает или блокирует доступ к устройствам;
+* freezer — приостанавливает и возобновляет выполнение задач в рамках контрольной группы. Поесле такого "снепшота", можно перенести процесс из одной сигруппы в другую
+* hugetlb — активирует поддержку больших страниц памяти для контрольных групп;
+* memory — управляет выделением памяти для групп процессов;
+* net_cls — помечает сетевые пакеты специальным тэгом, что позволяет идентифицировать пакеты, порождаемые определённой задачей в рамках контрольной группы;
+* netprio — используется для динамической установки приоритетов по трафику;
+* pids — используется для ограничения количества процессов в рамках контрольной группы.
+
+https://habr.com/ru/company/selectel/blog/303190/
+
+
+Раньше были cgroups, так как была плоская структура, а не иерархия и каждый процесс мог состоять в куче разных групп.
+
+Сейчас же под сигруппами подразумевают группы из нескольких единичных сигрупп.
+
+## What is cgroup v2?
 FEATURE STATE: Kubernetes v1.25 [stable]
 
 cgroup v2 is the next version of the Linux cgroup API. cgroup v2 provides a unified control system with enhanced resource management capabilities.
@@ -3287,6 +3428,21 @@ Some Kubernetes features exclusively use cgroup v2 for enhanced resource managem
 
 То есть только в v2 cgroup используются и limit и request-ы на память, так как в v1 использовались только limit-ы по факту. И в v1 не было механизма сжатия памяти, в случае, если оно подбиралась к лимиту, что приводило к OOM-ам. (https://kubernetes.io/blog/2021/11/26/qos-memory-resources/)
 
+Причём дочерние процессы автоматом принадлежат той же сигруппе, что и родитель, при этом не могут иметь больше лимитов, чем они, что логичная защита от обхода.
+Но если ты рут, то можно мигрировать в другую группу и т.п.
+
+### v1 vs v2
+![Cgroup v2 vs Cgroups v1](https://miro.medium.com/max/750/1*P7ZLLF_F4TMgGfaJ2XIfuQ.webp "cgroup v2 vs cgroups v1")
+The main difference (imho)
+
+1. In inroups v2, you can only create subgroups in a single hierarchy.
+1. In cgroups v2 you can attach processes only to leaves of the hierarchy. You cannot attach a process to an internal subgroup if it has any controller enabled. The reason behind this rule is that processes in a given subgroup competing for resources with threads attached to its parent group create significant implementation difficulties.
+1. In cgroups v1, a process can belong to many subgroups, if those subgroups are in different hierarchies with different controllers attached. But, because belonging to more than one subgroup made it difficult to disambiguate subgroup membership, in cgroups v2, a process can belong only to a single subgroup.
+
+Systemd uses cgroups for service management, not resource management, many years now — each systemd service is mapped to a separate control group, grouped into three “slices”: system.slice — default place for all system services, the user.slice for all user sessions, and the machine.slice for virtual machines and Linux containers. Each system service resides within it’s own slice inside the system one. Like, `/system.slice/httpd.service`, for example, for Apache.
+
+#### Limits and requests with cgroup v2
+https://blog.kintone.io/entry/2022/03/08/170206#How-Kubernetes-manages-requests-and-limits-for-Pods
 
 ## Config best practice
 Интересный хинт написан тут - https://kubernetes.io/docs/concepts/configuration/overview/#services.
