@@ -10,4 +10,4 @@ spec:
     matchLabels:
       app: nginx
   endpoints:
-  - port: <Port here>
+  - port: 80

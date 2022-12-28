@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: myapp
+  name: nginx
 spec:
   selector:
     matchLabels:
-      app: myapp
+      app: nginx
   template:
     metadata:
       labels:
-        app: myapp
+        app: nginx
     spec:
       containers:
-      - name: myapp
-        image: <Image>
+      - name: nginx
+        image: ivorlun/bitnami-nginx-80:1.0
         resources:
           limits:
             memory: "128Mi"
             cpu: "200m"
         ports:
-        - containerPort: <Port>
+        - containerPort: 80
