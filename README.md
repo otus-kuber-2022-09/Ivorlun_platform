@@ -2876,7 +2876,7 @@ https://github.com/bitnami-labs/kube-libsonnet/raw/96b30825c33b7286894c095be19b7
 * человекочитаемые метрики по http
 
 
-## Prometheus and Grafana
+## Prometheus
 ![Prometheus architecture](https://prometheus.io/assets/architecture.png "Prometheus parts are within orange borders")
 
 Основной сервер Prometheus состоит из 3х частей:
@@ -2892,6 +2892,17 @@ https://github.com/bitnami-labs/kube-libsonnet/raw/96b30825c33b7286894c095be19b7
 3. Hisogram - How long or how big X was during time
 4. Summary - редко используются, гистограммы предпочтительнее
 
+Ещё раз то же иными словами:
+1. Counter (Счётчики) - считает элементы за период времени. Например, ошибки HTTP на серверах или посещения веб-сайта. И по логике, разумеется, счетчик может только увеличивать или обнулять число, поэтому не подходит для значений, которые могут уменьшаться, или для отрицательных значений.
+2. Gauge (Меры) - имеют дело со значениями, которые со временем могут уменьшаться. Их можно сравнить с термометрами — если посмотреть на термометр, увидим текущую температуру. Но измеритель не показывает развитие метрики за период времени - можно упустить нерегулярные изменения метрики со временем. Счётчик считает каждое событие точно, а Gauge - только раз в scrape period (15s default).
+3. Hisogram — более сложный тип, который предоставляет дополнительную информацию. Например, сумму измерений и их количество - отклик серверов больше 300 мс более 20% времени. Значения собираются в области с настраиваемой верхней границей. Поэтому гистограмма может:
+* Рассчитывать средние значения, то есть сумму значений, поделенную на количество значений.
+* Рассчитывать относительные измерения значений, и это очень удобно, если нужно узнать, сколько значений в определенной области соответствуют заданным критериям. Особенно это полезно, если нужно отслеживать пропорции или установить индикаторы качества.
+4. Summary (Сводки) — это расширенные гистограммы. Они тоже показывают сумму и количество измерений, а еще квантили за скользящий период. Квантили — это деление плотности вероятности на отрезки равной вероятности.
+
+* Hisogram (Гистограммы) объединяют значения за период времени, предоставляя сумму и количество, по которым можно отследить развитие определенной метрики.
+* Summary (Сводки), с другой стороны, показывают квантили за скользящий период (т. е. непрерывное развитие во времени). Это особенно удобно, если вам нужно узнать значение, которое представляет 95% значений, записанных за период.
+
 **Exporter** - сервис или скрипт, который преобразует метрики от приложений, не поддерживающих отдачу по эндпоинту /metrics в нативном формате, в понятный Prometheus-у образ и открывает их как /metrics.
 
 ![Prometheus Exporter](https://sysdig.com/wp-content/uploads/Blog-Kubernetes-Monitoring-with-Prometheus-7-Prometheus-Exporter.png "Prometheus Exporter")
@@ -2902,7 +2913,7 @@ https://github.com/bitnami-labs/kube-libsonnet/raw/96b30825c33b7286894c095be19b7
 
 Node exporter собирает метрики с помощью DaemonSet-а, чтобы автоматически масштабироваться на новые ноды.
 
-Если хочется нативно отдавать метрики без экспортера, то нужно использовать библиотеки для своего языка при разработке.
+Если хочется нативно отдавать метрики без экспортера, то нужно использовать библиотеки для своего языка при разработке. Инструментирование позволяет выделять область в памяти преложения, куда складываются счётчики или gauge-ы в какой-то момент времени, ну а потом их экспоузить.
 
 Почему pull модель хороша в противовес push (New relic, Cloud watch) в случае контейнеров и микросервисов?
 
@@ -2949,6 +2960,14 @@ Node exporter собирает метрики с помощью DaemonSet-а, ч
 1. Instant vector - a set of time series containing a single sample for each time series, all sharing the same timestamp (грубо - мгновенный вектор)
 1. Range vector - a set of time series containing a range of data points over time for each time series (то есть разамзанный во времени)
 2. Scalar - a simple numeric floating point value
+
+![Instant vector vs Range vector](https://hsto.org/webt/gs/ih/1_/gsih1_1lvftmhzgzuze3ctrlhci.png "Instant vector vs Range vector")
+
+То же самое, но более простыми словами:
+* Моментальные векторы, которые представляют все метрики по последней метке времени.
+* Векторы с диапазоном времени: если вам нужно посмотреть развитие метрики со временем, вы можете указать диапазон времени в запросе к Prometheus. В итоге получите вектор, объединяющий все значения, записанные за выбранный период.
+
+
 
 Функций много - https://prometheus.io/docs/prometheus/latest/querying/functions/.
 
@@ -3211,6 +3230,15 @@ Container runtime must implement a container metrics RPCs (CRI) superseeding cAd
 
 The **USE** method is **for resources** and the **RED** method is **for my services**.
 Что логично, так как utilization и stauration - относится как правило к HW части, а в приложении за перформанс отвечает скорее duration-rps связка.
+
+## Grafana
+
+Datasources
+
+Dashboards
+
+plugins == panels
+
 ## Pre-homework part
 
 Прошёлся по статье https://sysdig.com/blog/kubernetes-monitoring-prometheus/ (заблокирована из РФ) - там есть устаревшие данные, но она очень грамотно методологически написана.
@@ -3258,6 +3286,21 @@ https://www.youtube.com/watch?v=QoDqxm7ybLc
 https://www.cncf.io/blog/2021/10/25/prometheus-definitive-guide-part-iii-prometheus-operator/
 
 https://sysdig.com/blog/kubernetes-monitoring-prometheus-operator-part3/
+
+Dockerfile - nginx from bitnami with stub_status
+
+NGINX exposes a handful of metrics via the stub_status page - https://nginx.org/en/docs/http/ngx_http_stub_status_module.html#stub_status.
+
+Nginx exporter dashboard from URL for grafana - https://github.com/nginxinc/nginx-prometheus-exporter/tree/v0.11.0/grafana
+
+Prometheus operator installed with bundle -
+
+
+Grafana operator - https://github.com/grafana-operator/grafana-operator/blob/v4.8.0/documentation/deploy_grafana.md
+
+datasources and dashboards CR examples:
+
+https://github.com/grafana-operator/grafana-operator/tree/v4.8.0/deploy/examples
 
 
 
