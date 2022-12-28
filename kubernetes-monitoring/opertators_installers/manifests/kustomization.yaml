@@ -1,0 +1,9 @@
+namespace: grafana-operator-system
+namePrefix: grafana-operator-
+
+patchesStrategicMerge:
+- security_context.yaml
+
+resources:
+  - v4.8.0
+  - namespace.yaml
