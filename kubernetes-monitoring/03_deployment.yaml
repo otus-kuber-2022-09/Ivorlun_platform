@@ -18,5 +18,12 @@ spec:
           limits:
             memory: "128Mi"
             cpu: "200m"
+      - name: nginx-exporter
+        image: nginx/nginx-prometheus-exporter:0.11.0
+        args: ["-nginx.scrape-uri=http://nginx-clusterip/stub_status"]
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
         ports:
-        - containerPort: 80
+        - containerPort: 9113
