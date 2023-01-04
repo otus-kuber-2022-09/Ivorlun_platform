@@ -1,0 +1,34 @@
+apiVersion: integreatly.org/v1alpha1
+kind: GrafanaDataSource
+metadata:
+  name: prometheus-grafanadatasource
+spec:
+  name: middleware.yaml
+  datasources:
+    - name: Prometheus
+      type: prometheus
+      access: proxy
+      url: http://prometheus-service:9090
+      isDefault: true
+      version: 1
+      editable: true
+      jsonData:
+        tlsSkipVerify: true
+        timeInterval: "5s"
+# ---
+# apiVersion: integreatly.org/v1alpha1
+# kind: GrafanaDataSource
+# metadata:
+#   name: alertmanager-grafanadatasource
+# spec:
+#   name: middleware.yaml
+#   datasources:
+#     - name: Alertmanager
+#       type: alertmanager
+#       access: proxy
+#       url: http://alertmanager-service:9093
+#       isDefault: true
+#       version: 1
+#       editable: true
+#       jsonData:
+#         implementation: prometheus # this uses either cortex or prometheus

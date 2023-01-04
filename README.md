@@ -3281,22 +3281,32 @@ annotations:
 
 
 
-https://www.youtube.com/watch?v=QoDqxm7ybLc
-
-https://www.cncf.io/blog/2021/10/25/prometheus-definitive-guide-part-iii-prometheus-operator/
-
-https://sysdig.com/blog/kubernetes-monitoring-prometheus-operator-part3/
 
 Dockerfile - nginx from bitnami with stub_status
 
+Prometheus operator installed with bundle - https://github.com/prometheus-operator/prometheus-operator/blob/v0.61.1/Documentation/user-guides/getting-started.md#installing-the-operator.
+
+После этого создаём сервис аккаунт прометея в default namespace-е, а также кластер роль на чтение метрик и связываем их - https://github.com/prometheus-operator/prometheus-operator/blob/v0.61.1/Documentation/user-guides/getting-started.md#deploying-prometheus.
+
+
+
 NGINX exposes a handful of metrics via the stub_status page - https://nginx.org/en/docs/http/ngx_http_stub_status_module.html#stub_status.
 
-Nginx exporter dashboard from URL for grafana - https://github.com/nginxinc/nginx-prometheus-exporter/tree/v0.11.0/grafana
 
-Prometheus operator installed with bundle -
+Важно, что по умолчанию и в примере эндпоинт для сбора метрик в nginx `/stub_status`, в нашем же случае это `/basic_status` - поэтому прописываем `args: ["-nginx.scrape-uri=http://nginx-clusterip/basic_status"]`.
 
+Далее, если хотим проверить работает ли наш nginx и exporter используя единый сервис делаем port-forward и проверяем http://localhost:9113/metrics, где видим метрики в формате Прометея и http://localhost:8080/basic_status, где видим оригинальные метрики в формате nginx.
+
+После этого создаём CR Serivce Monitor (что по факту означает таргет для прометея) и проверяем что он успешно развёрнут в кластер `k describe smon nginx`.
+
+Далее создаём сам CR prometheus-а, в котором уже и указываем какие servicemonitor-ы он должен в себя вобрать.
+
+**Важно**, что по умолчанию, Prometheus будет подцеплять ServiceMonitors только из текущего namespace. Чтобы выбирать ServiceMonitors из других namespaces, нужно изменить поле `spec.serviceMonitorNamespaceSelector` в CR Prometheus.
+
+Далее, чтобы иметь доступ к UI Прометея, необходимо создать сервис, который создаст IP до стейтфулсета с Проеметеем.
 
 Grafana operator - https://github.com/grafana-operator/grafana-operator/blob/v4.8.0/documentation/deploy_grafana.md
+
 
 datasources and dashboards CR examples:
 
@@ -3304,9 +3314,23 @@ https://github.com/grafana-operator/grafana-operator/tree/v4.8.0/deploy/examples
 
 
 
+Nginx exporter dashboard from URL for grafana - https://github.com/nginxinc/nginx-prometheus-exporter/tree/v0.11.0/grafana
+
+
+### Полезные ссылки
+В качестве ориентира следует использовать два данных руководства, правда они используют kube-prometheus оператор, более популярный на основе связки сразу обоих операторов - prometheus-grafana
+
+https://www.youtube.com/watch?v=QoDqxm7ybLc
+
+https://www.cncf.io/blog/2021/10/25/prometheus-definitive-guide-part-iii-prometheus-operator/
+
+## GitOps
+
+https://habr.com/ru/company/flant/blog/526102/
 
 ---
 ---
+
 ## В манифестах нужно быть предельно внимательным к регистру и к автозаменам.
 Ошибся как всегда на этой игре с именами полей и именами сущностей:
 
