@@ -3295,26 +3295,39 @@ NGINX exposes a handful of metrics via the stub_status page - https://nginx.org/
 
 Важно, что по умолчанию и в примере эндпоинт для сбора метрик в nginx `/stub_status`, в нашем же случае это `/basic_status` - поэтому прописываем `args: ["-nginx.scrape-uri=http://nginx-clusterip/basic_status"]`.
 
-Далее, если хотим проверить работает ли наш nginx и exporter используя единый сервис делаем port-forward и проверяем http://localhost:9113/metrics, где видим метрики в формате Прометея и http://localhost:8080/basic_status, где видим оригинальные метрики в формате nginx.
+Далее, если хотим проверить работает ли наш nginx и exporter используя единый сервис делаем port-forward и проверяем http://localhost:9113/metrics, где видим метрики в формате Прометея и http://localhost:8080/basic_status, уже оригинальные метрики в формате nginx.
 
 После этого создаём CR Serivce Monitor (что по факту означает таргет для прометея) и проверяем что он успешно развёрнут в кластер `k describe smon nginx`.
+Стоит отметить, что по умолчанию, Prometheus будет подцеплять ServiceMonitors только из текущего namespace. Чтобы выбирать ServiceMonitors из других namespaces, нужно изменить поле `spec.serviceMonitorNamespaceSelector` в CR Prometheus.
 
-Далее создаём сам CR prometheus-а, в котором уже и указываем какие servicemonitor-ы он должен в себя вобрать.
+**Важно!** Не только для подов но и для самого сервиса необходимо обязательно создать лейблы, так как именно по ним сервис монитор и будет выбирать таргет.
+```
+kind: Service
+metadata:
+  name: nginx-clusterip
+  labels:
+    app: nginx
+```
 
-**Важно**, что по умолчанию, Prometheus будет подцеплять ServiceMonitors только из текущего namespace. Чтобы выбирать ServiceMonitors из других namespaces, нужно изменить поле `spec.serviceMonitorNamespaceSelector` в CR Prometheus.
+![Prometheus Operator elements interaction](https://github.com/prometheus-operator/prometheus-operator/raw/v0.61.1/Documentation/img/custom-metrics-elements.png "Prometheus Operator elements interaction")
 
-Далее, чтобы иметь доступ к UI Прометея, необходимо создать сервис, который создаст IP до стейтфулсета с Проеметеем.
+Далее создаём CR самого prometheus-а, в котором уже и указываем какие servicemonitor-ы он должен в себя вобрать.
+
+После, чтобы иметь доступ к UI Прометея, необходимо создать сервис, который создаст IP до стейтфулсета с Проеметеем.
+
+Grafana
 
 Grafana operator - https://github.com/grafana-operator/grafana-operator/blob/v4.8.0/documentation/deploy_grafana.md
 
+Представляет собой несколько  CRD, а также сервис и деплоймент с pod-ом контроллера, который отслеживает изменения конфигураций и появление CR типа grafana.  
 
-datasources and dashboards CR examples:
+Всё управление осуществляется посредством созданных CR.
 
-https://github.com/grafana-operator/grafana-operator/tree/v4.8.0/deploy/examples
+Для того, чтобы инициализировать графану необходимы:
+1. Источник данных для вывода в дашборды - datasource. В моём случае это прометей со встроенным `type: prometheus` - https://github.com/grafana-operator/grafana-operator/blob/v4.8.0/deploy/examples/datasources/Prometheus.yaml
+2. Конфигруация Dashbord-а, которую получаю по ссылке https://github.com/grafana-operator/grafana-operator/blob/v4.8.0/deploy/examples/dashboards/DashboardFromURL.yaml используя конфигурцию официального репозитория nginx экспортера - https://github.com/nginxinc/nginx-prometheus-exporter/tree/v0.11.0/grafana
+3. Сам инстанс графаны https://github.com/grafana-operator/grafana-operator/blob/v4.8.0/deploy/examples/Grafana.yaml
 
-
-
-Nginx exporter dashboard from URL for grafana - https://github.com/nginxinc/nginx-prometheus-exporter/tree/v0.11.0/grafana
 
 
 ### Полезные ссылки
