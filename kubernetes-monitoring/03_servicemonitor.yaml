@@ -1,0 +1,13 @@
+# https://github.com/prometheus-operator/prometheus-operator/blob/v0.61.1/Documentation/user-guides/getting-started.md
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nginx
+  labels:
+    team: devops
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  endpoints:
+  - port: "exporter"
