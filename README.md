@@ -2008,7 +2008,7 @@ A RoleBinding can also reference a ClusterRole to grant the permissions defined 
 Интересно, что есть ClusterRole, но это совсем не значит, что права будут на весь кластер - можно сделать привязку такой роли в пределах одного namespace.
 https://kubernetes.io/docs/reference/access-authn-authz/rbac/#user-facing-roles
 
-При этом, чтобы дать возможность всем service account-ам одного namespace-а права на доступ ко всему кластеру нужно использовать cluser role binding, но с ограничением `kind: Group name: system:serviceaccounts:namespace`.
+При этом, чтобы дать возможность всем service account-ам одного namespace-а права на доступ ко всему кластеру нужно использовать cluster role binding, но с ограничением `kind: Group name: system:serviceaccounts:namespace`.
 
 Роли можно объединять в общности посредством aggregated clusterroles с помощью лейблов: https://kubernetes.io/docs/reference/access-authn-authz/rbac/#aggregated-clusterroles
 
@@ -3279,26 +3279,48 @@ annotations:
 
 ## Homework part
 
+В nginx-test-img/Dockerfile - nginx from bitnami with stub_status and nginx test info page.
 
+Общий процесс развёртки состоит глобально из 3х частей:
+1. Деплоймент Эндженикса с sidecar nodeexporter-ом, который преобразует метрики в нативный для Prometheus-а формат. Ставится в Default namespace.
+1. Установка Prometheus оператора и последующих настроек сервис акканутов, таргетов для скреппинга и сервисов для пользователей и графаны. Ставится в Default namespace.
+1. Установка Grafana оператора и последующих настроек сервис акканутов, дашбордов и датасорсов для него. Ставится в **Grafana-operator-system** namespace.
 
+### TL;DR
+Поэтапные команды для развёртки:
 
-Dockerfile - nginx from bitnami with stub_status
+1.  `cd kubernetes-monitoring/opertators_installers && ./00_install_prometheus-operator_v0.61.1.sh` - Установка Prometheus operator
+1. `k apply -f 01_prom_SA_rbac.yaml` - Настройка SA, позволяющего читать метрики всего Prometheus operator-у
+1. `k apply -f 02_nginx.yaml` - Деплоймент 3х nginx с sidecar nodeexporter-ом и ClusterIP
+1. `k apply -f 03_servicemonitor.yaml` - CR типа servicemonitor, что по факту значит джоба с таргетом
+1. `k apply -f 04_prometheus.yaml` - CR типа Prometheus, то есть деплой самого прометеуса с привязкой к Сервис Монитору
+1. `k apply -f 05_prom_svc.yaml` - Сервис типа ClusterIP, который будет использоваться как датасорс для графаны и для пользователей
+1. `01_install_grafana-operator_v.4.8.0.sh` - Установка Grafana оператора через кастомайз с изменённым аргументом в деплойменте, позволяющем следить
+1. `k apply -f 06_grafana_rbac.yaml` - SA, позволяющий отслеживать дашборды и датасорсы из других неймспейсов, если нужно
+1. `k apply -f 07_grafana_dashboards.yaml` - CR официальный дашборд для графаны от разработчиков nginx nodeexporter-a
+1. `k apply -f 08_grafana_datasource.yaml` - CR датасорс прометея
+1. `k apply -f 09_grafana.yaml` - CR сам деплоймент графаны с сервисом, связанный с датасорсом и дашбордом, в котором уже наглядно видны все метрики
+1. `k -n grafana-operator-system port-forward services/grafana-service 3000:3000` форвордим и смотрим метрики
 
-Prometheus operator installed with bundle - https://github.com/prometheus-operator/prometheus-operator/blob/v0.61.1/Documentation/user-guides/getting-started.md#installing-the-operator.
+### Подробно.
+
+#### Prom + nginx
+
+Prometheus operator установлен вручную с помощью бандла - https://github.com/prometheus-operator/prometheus-operator/blob/v0.61.1/Documentation/user-guides/getting-started.md#installing-the-operator.
+
+Его конфигурация подразумевает, что он ставится в default namespace по умолчанию.
 
 После этого создаём сервис аккаунт прометея в default namespace-е, а также кластер роль на чтение метрик и связываем их - https://github.com/prometheus-operator/prometheus-operator/blob/v0.61.1/Documentation/user-guides/getting-started.md#deploying-prometheus.
 
 
-
 NGINX exposes a handful of metrics via the stub_status page - https://nginx.org/en/docs/http/ngx_http_stub_status_module.html#stub_status.
 
-
-Важно, что по умолчанию и в примере эндпоинт для сбора метрик в nginx `/stub_status`, в нашем же случае это `/basic_status` - поэтому прописываем `args: ["-nginx.scrape-uri=http://nginx-clusterip/basic_status"]`.
+**Важно**, что по умолчанию и в примере **эндпоинт для сбора метрик в nginx** `/stub_status`, в нашем же случае это `/basic_status` - поэтому прописываем `args: ["-nginx.scrape-uri=http://nginx-clusterip/basic_status"]`.
 
 Далее, если хотим проверить работает ли наш nginx и exporter используя единый сервис делаем port-forward и проверяем http://localhost:9113/metrics, где видим метрики в формате Прометея и http://localhost:8080/basic_status, уже оригинальные метрики в формате nginx.
 
 После этого создаём CR Serivce Monitor (что по факту означает таргет для прометея) и проверяем что он успешно развёрнут в кластер `k describe smon nginx`.
-Стоит отметить, что по умолчанию, Prometheus будет подцеплять ServiceMonitors только из текущего namespace. Чтобы выбирать ServiceMonitors из других namespaces, нужно изменить поле `spec.serviceMonitorNamespaceSelector` в CR Prometheus.
+Стоит отметить, что по умолчанию, Prometheus будет подцеплять ServiceMonitors только из текущего namespace. Чтобы использовать ServiceMonitors из других namespaces, нужно изменить поле `spec.serviceMonitorNamespaceSelector` в CR Prometheus.
 
 **Важно!** Не только для подов но и для самого сервиса необходимо обязательно создать лейблы, так как именно по ним сервис монитор и будет выбирать таргет.
 ```
@@ -3315,11 +3337,15 @@ metadata:
 
 После, чтобы иметь доступ к UI Прометея, необходимо создать сервис, который создаст IP до стейтфулсета с Проеметеем.
 
-Grafana
+#### Grafana
 
-Grafana operator - https://github.com/grafana-operator/grafana-operator/blob/v4.8.0/documentation/deploy_grafana.md
+Очень важно, что конфигурация по умолчанию подразумевает, что оператор ставится в grafana-operator-system ns, что требует деплоя дашбордов, датасорсов туда же, а также СА аккаунта, позволяющего читать сервисы как датасорсы из других неймспейсов.
 
-Представляет собой несколько  CRD, а также сервис и деплоймент с pod-ом контроллера, который отслеживает изменения конфигураций и появление CR типа grafana.  
+И так как графана в одном неймспейсе, а прометей-источник в другом, то обращаемся к нему по fqdn:
+http://prometheus-service.default.svc.cluster.local:9090
+
+Grafana operator - https://github.com/grafana-operator/grafana-operator/blob/v4.8.0/documentation/deploy_grafana.md.
+Представляет собой несколько  CRD, а также сервис и деплоймент с pod-ом контроллера, который отслеживает изменения конфигураций и появление CR типа grafana.
 
 Всё управление осуществляется посредством созданных CR.
 
@@ -3328,6 +3354,20 @@ Grafana operator - https://github.com/grafana-operator/grafana-operator/blob/v4.
 2. Конфигруация Dashbord-а, которую получаю по ссылке https://github.com/grafana-operator/grafana-operator/blob/v4.8.0/deploy/examples/dashboards/DashboardFromURL.yaml используя конфигурцию официального репозитория nginx экспортера - https://github.com/nginxinc/nginx-prometheus-exporter/tree/v0.11.0/grafana
 3. Сам инстанс графаны https://github.com/grafana-operator/grafana-operator/blob/v4.8.0/deploy/examples/Grafana.yaml
 
+После создания CR графаны автоматически создаётся сервис, который мы уже можем просматривать.
+`k -n grafana-operator-system port-forward services/grafana-service 3000:3000` форвордим и смотрим метрики
+
+### Проверка работы
+1. Пробрасываем порты на локалхост
+```
+kubectl -n grafana-operator-system port-forward services/grafana-service 3000:3000 & \
+kubectl port-forward services/prometheus-service 9090:9090 & \
+kubectl port-forward services/nginx-clusterip 8080:80 & \
+kubectl port-forward services/nginx-clusterip 9113:9113 &
+```
+1. Открываем nginx и набиваем там реквестов - проще по 8080, так как там страница с автообновлением
+1. Открываем прометеус, смотрим, что всё хорошо
+1. Открываем графану и видим дашборд с графиками
 
 
 ### Полезные ссылки

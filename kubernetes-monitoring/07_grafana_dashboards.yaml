@@ -5,5 +5,6 @@ metadata:
   name: nginx-grafana-dashboard-from-url
   labels:
     app: grafana
+  namespace: grafana-operator-system
 spec:
   url: https://raw.githubusercontent.com/nginxinc/nginx-prometheus-exporter/v0.11.0/grafana/dashboard.json
