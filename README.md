@@ -3575,7 +3575,7 @@ container ---stdout--> containerd ---json---> file.log > fluentd > elasticsearch
 
 https://sematext.com/blog/kubernetes-elasticsearch-autoscaling/
 
-* Elastic Cloud on Kubernetes. Not open source and need a subscription.
+* Elastic Cloud on Kubernetes. Best fit but requires to pay for autoscaling and has not free elastic license.
 
 * OpenSearch K8s Operator. The go-to Operator for OpenSearch. It’s open-source but, at the time of this writing, it doesn’t have autoscaling. But we did some experiments and it’s relatively easy to plug in logic that adds and removes nodes, since this Operator knows how to handle new nodes and how to drain nodes that you want to remove.
 
