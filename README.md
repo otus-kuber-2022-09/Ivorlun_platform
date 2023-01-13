@@ -3390,6 +3390,7 @@ https://www.cncf.io/blog/2021/10/25/prometheus-definitive-guide-part-iii-prometh
 
 
 ### Логи используются для:
+* Complience - например хранения банковских транзакций по закону
 * Устранение неполадок.
 * Понимание поведения системы/приложения
 * Аудит
@@ -3406,18 +3407,32 @@ https://www.cncf.io/blog/2021/10/25/prometheus-definitive-guide-part-iii-prometh
 
 Важно, чтобы на конкретную строку в логах можно было скинуть ссылку внутри команды на http ui, а не говорить - посмотри в таком-то контейнере по ssh.
 
-## Elasticsearch
-
-Основные ноды (это скорее роли, так как могут быть на одной физической машине)
-master node - ноды управления
-data node - данные лежат тут
-client node - сюда приходят данные в чистом виде
-
-Эластик шардирует (то есть разбивает) данные (индекс) на части, которые хранятся на дата нодах.
-
-В свою очередь у него есть нечётное число мастер нод (для кворума), которые определяют какой шард индекса на какую дата ноду записывать, а потом из них данные умеют доставать и склеивать воедино.
+## Elastic Stack
+Компоненты стэка:
+![Elastic Stack](https://www.cisco.com/c/dam/en/us/products/collateral/hyperconverged-infrastructure/hyperflex-hx-series/elastic-cloud-on-kubernetes-on-cisco-hx.docx/_jcr_content/renditions/elastic-cloud-on-kubernetes-on-cisco-hx_4.jpg "Elastic Stack")
 
 
+https://www.elastic.co/guide/en/welcome-to-elastic/current/stack-components.html
+
+### Elasticsearch
+
+Elasticsearch  - распределённое хранилище с аналитическим и полнотекстовым поисковым движком на базе apache lucene. Оно превосходно себя проявляет в полуструктурированных данных типа логов
+
+Как правило в кластере эластика, данные хранятся в шардах (я сразу подумал о raid), распределённые по нодам. Кластер состоит из множества нод для улучшения доступности и отказоустойчивости. Любая нода может выполнять все роли, однако, в больших масштабах чаще им назначают только специальные.
+
+Виды нод - скорее роли, так как они как правило используются одновременно, если специально не разделены:
+
+* **Master Nodes** – Управляет кластером: создаёт или удаляет индексы, отслеживает ноды в кластере, выбирает на какие ноды какие шарды аллоцировать. Требуется как минимум 3 и нечётного количества, чтобы не произошёл split brains. Определяют какой шард индекса на какую дата ноду записывать, а потом из них извлекают данные и склеивают воедино.
+* **Data Nodes** – Хранят данные и совершают CRUD-операции с данными
+* **Ingest Nodes** (от англ. проглатывание) –  препроцессинг по преобразованию и обогощению данных до их индексирования (может быть частинчно заменой logstash)
+* **Coordinating Nodes** – Для маршрутизации запросов, отвечает за снижение задержки поисковых запросов и за массовое индексирование. Эти запросы выполняются, часто, в 2 этапа так как данные разбиты по нодам - приходит запрос на поиск, а нода координации знает кому отправить. Запрос 1. запрос уходит на нужные ноды с данными и 2. возвращается к координатору, который уже склеивает данные воедино. Как правило каждая нода явно является координатором
+* **Alerting Nodes** – Специализированные для уведомлений
+* **Machine Learning** Nodes – Специализированные для machine learning.  Платная.
+* client node - сюда приходят данные в чистом виде
+
+
+
+![Simple Elastic in K8s](https://res.cloudinary.com/practicaldev/image/fetch/s--pkQ3ztaH--/c_limit%2Cf_auto%2Cfl_progressive%2Cq_auto%2Cw_880/https://docs.aws.amazon.com/elasticsearch-service/latest/developerguide/images/za-2-az.png "Simple Elastic in K8s")
 
 ### Основные понятия Elasticsearch
 * **индекс** - не как в индекс БД, а похоже на саму базу данных. Состоит из разных шардов, которые распределены.
@@ -3427,19 +3442,162 @@ client node - сюда приходят данные в чистом виде
 * **узел** - узел с определённой
 * **шарды** и копии - шард грубо уникальный набор документов. У каждого шарда есть replica, т.е. копии данных и мастер нода эластика старается сделать так, чтобы копия и оригинал документа не находились внутри одной ноды, а были распределены.
 * **разметку и типы данных** - маппинг в документе сопоставляет полям условно простые типы - условно схема БД. Есть определённый набор полей и важно, чтобы эластик знал какого типа данных эти поля, чтобы правильно проводить операции поиска - инты суммировать, в строках искать подстроки и символы и тп.
-* **обратный индекс** - пример прямого индекса - оглавление: `Введение в эластик страница 15`, пример обратного индекса - предметный указатель: `elastic можно найти в главах Введение в эластик,... `
+* **обратный индекс** - Именно через него и работает поиск. Пример прямого индекса - оглавление: `Введение в эластик - страница 15`, пример обратного индекса - предметный указатель: `"elastic" можно найти в главах Введение в эластик,... `
 
 Индекс > Тип > Документ
 
 В одном индексе может быть много типов
 
-Если используется шиппер логов, то все данные будут нормализованы (т.е. приведены к одному формату)
+### ETL Systems
+ETL, which stands for 
+1. extract
+1. transform
+1. load
 
+It is a data integration process that combines data from multiple data sources into a single, consistent data store that is loaded into a data warehouse or other target system.
+
+#### Logstash
+
+
+Logstash - это конвертер всех логов в формат необходимый для хранения. Похоже на node exporter для Prometheus, только преобразует для множества целей и приложений, не обязательно в эластик - например, можно отдавать логи в BI базу данных, rabbitmq или в pager duty для отправки уведомлений https://www.elastic.co/guide/en/logstash/current/output-plugins.html.
+
+То есть Logstash осуществляет:
+1. Парсинг
+2. Фильтрацию
+3. Преобразование
+
+Сам по себе бессмысленен, но может принимать данные почти любого типа и хранить во всевозможных местах благодаря архитектуре основанной на плагинах.
+
+В нашем случае типичная картина логов такая:
+```
+Filebeat---Logstash------
+                         \
+Syslog-----Logstash-------Elasticsearch----Kibana
+                         /
+Application---Logstash---
+```
+Отдельно нужно отметить, чтобы логи попали в логстэш используюся "шипперы", то есть доставщики логов типа filebeat и тп.
+
+##### Examples
+Говорят, люди его используют даже чтобы производить конвертацию данных из одного типа базы в другую.
+
+```
+input {
+  file{
+    path => "/var/logs/users.csv"
+    start_position => "beginning"
+    sincedb_path => "NULL"
+  }
+}
+filter {
+  csv{
+  autodetect_column_names => true
+  }
+  mutate {
+    convert => {
+      "Age" => "integer"
+      "Salary" => "float"
+      }
+    rename => { "FName" => "Firstname"
+                "LName" => "Lastname" }
+    gsub => [
+            "EmailId", "\.", "_"
+    ]
+    strip => ["Firstname", "Lastname"]
+    uppercase => [ "Gender" ]
+  }
+}
+output {...}
+stdout {...}
+```
+
+Bitnami Elasticsearch Helm chart https://docs.bitnami.com/tutorials/run-elastic-stack-prometheus-kubernetes/
+![Elastic Stack on Kubernetes Bitnami](https://docs.bitnami.com/tutorials/_next/static/images/es-deployment-architecture-909a8dbc52084e485e65e844cb5693a0.png.webp "Elastic Stack on Kubernetes Bitnami")
+
+Альтернатива от OpenEBS, показывающая работу с PV
+https://openebs.io/docs/stateful-applications/elasticsearch
+![ELK Stack with EBS example](https://openebs.io/docs/assets/files/Local-PV-Devices-elastic-deployment-d960b9d0ea5aecbde6c44c07d88dea8f.svg "ELK Stack with EBS example")
+
+#### Fluentd and Fluentbit
+
+Opensource конкурент logstash - делают то же самое, но лучше.
+
+```
+Filebeat-----                      -----Complience
+             \                    /
+Syslog--------Fluentd or Fluentbit----Debugging
+             /                    \
+Application--                      -----Security and business analytics
+```
+
+Можно менять формат логов, не только унифицировать.
+А также обогощать дополнительной информацией - например именем пода, контейнера, неймспесом. Это позволяет группировать логи в дальнейшем.
+
+Также есть встроенный роутинг информации в любое место.
+Например логи из питоньего приложения будут идти в монгоДБ, а логи из джавы в кафку.
+
+Чтобы всё это заработало, необходимо, помимо ДемонСета
+1. Установить плагины для входных
+1. Настроить конфигурационный файл FluentD:
+  * source
+  * filter and parser - define how data is processed and map key-value pairs
+  * enrich by `<record>` - delete, add, udate fields using record transformers (anonimize data for example)
+  * output `match` - куда отправлять по какому адресу и тп
+
+Стоит отметить, что внутри fluentd есть теги, которые позволяют на их основе работать с данными - объединять, модифицировать или отправлять куда надо.
+
+Встроенная надёжность - сохранение на диске всех данных до тех пор, пока не придут в место назначения и будет пытаться с ним соединится.
+
+**Fluentbit** - похож на легковесный fluentd (0 зависимостей, вместо кучи руби), только больше нацеленный на быструю преобразованию и отправку, в то время как fluentd это полноценный самостоятельный инстанс централизованного сбора, который ждёт логи по сети ото всех, не только микросервисов.
+
+Fluentbit так же деплоится куда хочешь и у него также есть возможность собирать простейшие метрики среды типа CPU, RAM, Disk.
+
+Особый прикол, что в fluentbit есть sql-processor, который позволяет на ходу выполнять запросы, группируя данные, вычисляя средние и работая с таймштампами.
+
+**Используя аннотации** вида `fluentbit.io/parser: apache` можно тут же помечать как преобразовывать те или иные данные.
+
+### Kafka
+Часто используют кафку, если нужна гарантированная доставка.
+
+EDA - Event Driven Architecture.
+
+См CAP теорема vs EDA
+
+## Logging in Kuber
+В кубере существует, пожалуй, 3 основных подхода:
+1. From the App itself - само отправляет на бэкенд, но должно быть жёстко инструментировано соответственно.
+1. Sidecar - тут всё понятно, внутри пода стоит вторым контейнером, скажем, filebeat и забирает логи, отправляя их в бэкенд.
+1. External Agent. Рядом с подом приложения размещается отдельный под для управления логами. Когда Логи как положено выдаются в аутпут, а далее, уже могут сохраняться на диск хоста, например. После чего внешний выделенный pod может их обрабатывать, отправляя в бэкенд для хранения.
+container ---stdout--> containerd ---json---> file.log > fluentd > elasticsearch/stackdriver > kibana
+
+
+### Elastic-stack operators
+
+https://sematext.com/blog/kubernetes-elasticsearch-autoscaling/
+
+* Elastic Cloud on Kubernetes. Not open source and need a subscription.
+
+* OpenSearch K8s Operator. The go-to Operator for OpenSearch. It’s open-source but, at the time of this writing, it doesn’t have autoscaling. But we did some experiments and it’s relatively easy to plug in logic that adds and removes nodes, since this Operator knows how to handle new nodes and how to drain nodes that you want to remove.
+
+* es-operator. This is an Operator that Zalando is using for a while in production. It’s open-source and it already supports autoscaling for the Enterprise Search use-case (i.e. data that isn’t time series). It can scale based on CPU or based on the number of shards per node. It can also automatically add replicas if you have more nodes than shards.
+
+## Homework part
+
+```
+git clone git@github.com:elastic/helm-charts.git && cd helm-charts && git co v8.5.1
+kubectl create ns observability
+helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elasticsearch.values.yaml --namespace observability --set imageTag=8.5.1 elasticsearch elasticsearch && \
+helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elasticsearch.values.yaml --namespace observability --set imageTag=8.5.1 kibana kibana && \
+helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elasticsearch.values.yaml --namespace observability --set imageTag=8.5.1 fluent-bit fluent-bit
+
+```
 
 ---
 ## GitOps
 
 https://habr.com/ru/company/flant/blog/526102/
+
+https://cloud.yandex.ru/training/training-pro
 
 ---
 ---
@@ -3635,6 +3793,8 @@ https://blog.kintone.io/entry/2022/03/08/170206#How-Kubernetes-manages-requests-
 
 Вообще полезная страница, по ней можно делать финальную сверку своих конфигураций.
 
+## Kubectl exec
+-- в kubectl exec нужен для того чтобы cli мог понять где аргументы cli, а где аргументы команды передаваемые в контейнер!
 
 # Глоссарий Kubernetes-а
 https://kubernetes.io/docs/reference/glossary/?all=true
