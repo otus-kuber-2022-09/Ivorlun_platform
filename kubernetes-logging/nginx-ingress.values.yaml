@@ -1,0 +1,24 @@
+controller:
+  replicaCount: 3
+
+  tolerations:
+    - key: node-role
+      operator: Equal
+      value: infra
+      effect: NoSchedule
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: app
+              operator: In
+              values:
+              - nginx-ingress
+          topologyKey: kubernetes.io/hostname
+
+  nodeSelector: 
+    cloud.google.com/gke-nodepool: infra-pool

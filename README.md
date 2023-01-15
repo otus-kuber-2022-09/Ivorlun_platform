@@ -3587,15 +3587,19 @@ https://sematext.com/blog/kubernetes-elasticsearch-autoscaling/
 ```
 git clone git@github.com:elastic/helm-charts.git && cd helm-charts && git co v7.17.3
 kubectl create ns observability
-helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elasticsearch.values.yaml --namespace observability --set imageTag=7.17.3 elasticsearch elasticsearch && \
-helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/kibana.values.yaml --namespace observability --set imageTag=7.17.3 kibana kibana && \
-helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/fluent-bit.values.yaml --namespace observability --set imageTag=7.17.3 fluent-bit fluent-bit
+helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elasticsearch.values.yaml --namespace observability --set imageTag=7.17.3 elasticsearch elasticsearch
+helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/kibana.values.yaml --namespace observability --set imageTag=7.17.3 kibana kibana
+helm repo add fluent https://fluent.github.io/helm-charts
+helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/fluent-bit.values.yaml --namespace observability fluent-bit fluent/fluent-bit
 
 ```
 
-Замечания к ДЗ
-1. Microservices demo yaml - adcart v0.3.4 
-2. Elastic helm repo is blocked even via vpn, so github repo is easier to use. Problems with ingress and kibana
+**Замечания к ДЗ**
+1. Microservices demo yaml - adcart v0.3.4 image tag 
+2. Elastic helm repo 
+  1. Has no fluent-bit 
+  2. Is blocked even via vpn, so github repo is easier to use
+  3. Has problems with ingress kibana values - class should be removed
 3. xip.ip is dead, use nip.io instead
 4. 
 
