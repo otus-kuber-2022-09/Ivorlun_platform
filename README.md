@@ -3448,8 +3448,8 @@ Elasticsearch  - распределённое хранилище с аналит
 
 В одном индексе может быть много типов
 
-### ETL Systems
-ETL, which stands for 
+### ETL Systems (Logstash, Fluentd/bit)
+ETL stands for 
 1. extract
 1. transform
 1. load
@@ -3511,6 +3511,7 @@ output {...}
 stdout {...}
 ```
 
+Распределение нод эластика по кластеру можно посмотреть в соответствующих примерах развёртки. 
 Bitnami Elasticsearch Helm chart https://docs.bitnami.com/tutorials/run-elastic-stack-prometheus-kubernetes/
 ![Elastic Stack on Kubernetes Bitnami](https://docs.bitnami.com/tutorials/_next/static/images/es-deployment-architecture-909a8dbc52084e485e65e844cb5693a0.png.webp "Elastic Stack on Kubernetes Bitnami")
 
@@ -3566,8 +3567,8 @@ EDA - Event Driven Architecture.
 ## Logging in Kuber
 В кубере существует, пожалуй, 3 основных подхода:
 1. From the App itself - само отправляет на бэкенд, но должно быть жёстко инструментировано соответственно.
-1. Sidecar - тут всё понятно, внутри пода стоит вторым контейнером, скажем, filebeat и забирает логи, отправляя их в бэкенд.
-1. External Agent. Рядом с подом приложения размещается отдельный под для управления логами. Когда Логи как положено выдаются в аутпут, а далее, уже могут сохраняться на диск хоста, например. После чего внешний выделенный pod может их обрабатывать, отправляя в бэкенд для хранения.
+1. Sidecar - внутри пода вторым контейнером стоит, скажем, filebeat и забирает логи, отправляя их в бэкенд.
+1. External Agent. Рядом с подом приложения размещается отдельный под для управления логами. Когда Логи, как положено, выдаются в аутпут, а далее, уже могут сохраняться на диск хоста, например. После чего внешний выделенный pod может их обрабатывать для всей ноды по поддиректориям, отправляя в бэкенд для хранения.
 container ---stdout--> containerd ---json---> file.log > fluentd > elasticsearch/stackdriver > kibana
 
 
@@ -3575,7 +3576,7 @@ container ---stdout--> containerd ---json---> file.log > fluentd > elasticsearch
 
 https://sematext.com/blog/kubernetes-elasticsearch-autoscaling/
 
-* Elastic Cloud on Kubernetes. Best fit but requires to pay for autoscaling and has not free elastic license.
+* Elastic Cloud on Kubernetes. Fittest one but requires to pay for autoscaling and has not free elastic license.
 
 * OpenSearch K8s Operator. The go-to Operator for OpenSearch. It’s open-source but, at the time of this writing, it doesn’t have autoscaling. But we did some experiments and it’s relatively easy to plug in logic that adds and removes nodes, since this Operator knows how to handle new nodes and how to drain nodes that you want to remove.
 
@@ -3584,13 +3585,19 @@ https://sematext.com/blog/kubernetes-elasticsearch-autoscaling/
 ## Homework part
 
 ```
-git clone git@github.com:elastic/helm-charts.git && cd helm-charts && git co v8.5.1
+git clone git@github.com:elastic/helm-charts.git && cd helm-charts && git co v7.17.3
 kubectl create ns observability
-helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elasticsearch.values.yaml --namespace observability --set imageTag=8.5.1 elasticsearch elasticsearch && \
-helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elasticsearch.values.yaml --namespace observability --set imageTag=8.5.1 kibana kibana && \
-helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elasticsearch.values.yaml --namespace observability --set imageTag=8.5.1 fluent-bit fluent-bit
+helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elasticsearch.values.yaml --namespace observability --set imageTag=7.17.3 elasticsearch elasticsearch && \
+helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/kibana.values.yaml --namespace observability --set imageTag=7.17.3 kibana kibana && \
+helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/fluent-bit.values.yaml --namespace observability --set imageTag=7.17.3 fluent-bit fluent-bit
 
 ```
+
+Замечания к ДЗ
+1. Microservices demo yaml - adcart v0.3.4 
+2. Elastic helm repo is blocked even via vpn, so github repo is easier to use. Problems with ingress and kibana
+3. xip.ip is dead, use nip.io instead
+4. 
 
 ---
 ## GitOps
