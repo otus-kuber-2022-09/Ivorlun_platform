@@ -1,4 +1,8 @@
+# https://docs.fluentbit.io/manual/pipeline/outputs/elasticsearch
+image:
+  tag: "2.0.8-debug"
 backend:
   type: es
   es:
     host: elasticsearch-master
+    Write_Operation: upsert
