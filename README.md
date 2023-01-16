@@ -3511,7 +3511,7 @@ output {...}
 stdout {...}
 ```
 
-Распределение нод эластика по кластеру можно посмотреть в соответствующих примерах развёртки. 
+Распределение нод эластика по кластеру можно посмотреть в соответствующих примерах развёртки.
 Bitnami Elasticsearch Helm chart https://docs.bitnami.com/tutorials/run-elastic-stack-prometheus-kubernetes/
 ![Elastic Stack on Kubernetes Bitnami](https://docs.bitnami.com/tutorials/_next/static/images/es-deployment-architecture-909a8dbc52084e485e65e844cb5693a0.png.webp "Elastic Stack on Kubernetes Bitnami")
 
@@ -3590,18 +3590,18 @@ kubectl create ns observability
 helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elasticsearch.values.yaml --namespace observability --set imageTag=7.17.3 elasticsearch elasticsearch
 helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/kibana.values.yaml --namespace observability --set imageTag=7.17.3 kibana kibana
 helm repo add fluent https://fluent.github.io/helm-charts
-helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/fluent-bit.values.yaml --namespace observability fluent-bit fluent/fluent-bit
+helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/fluent-bit.values.yaml --namespace observability --version 0.20.11 fluent-bit fluent/fluent-bit
 
 ```
 
 **Замечания к ДЗ**
-1. Microservices demo yaml - adcart v0.3.4 image tag 
-2. Elastic helm repo 
-  1. Has no fluent-bit 
+1. Microservices demo yaml - adcart v0.3.4 image tag
+2. Elastic helm repo
+  1. Has no fluent-bit
   2. Is blocked even via vpn, so github repo is easier to use
   3. Has problems with ingress kibana values - class should be removed
 3. xip.ip is dead, use nip.io instead
-4. 
+4.
 
 ---
 ## GitOps
