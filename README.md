@@ -3381,13 +3381,7 @@ https://www.cncf.io/blog/2021/10/25/prometheus-definitive-guide-part-iii-prometh
 
 # Homework 9 (Logging)
 ## Напоминание банальных истин
-
 **Log = Metadata + Timestamp + Data**
-
-В Kuber-e логи не могут храниться локально по умолчанию.
-
-Так как инстансы ограничены жизненным циклом, а хранилища от дистрибутивов и сред сильно различаются.
-
 
 ### Логи используются для:
 * Complience - например хранения банковских транзакций по закону
@@ -3398,29 +3392,72 @@ https://www.cncf.io/blog/2021/10/25/prometheus-definitive-guide-part-iii-prometh
 * Метрики - например забирать метрики из логов nginx-а по статусам
 * Сбор бизнес-метрик
 
-### Некоторые особенности, которые необходимо учитывать
+### Общие особенности логгирования, которые необходимо учитывать
 * Нестандартный/несовместимый формат (старые данные о банковский транзакциях, например)
 * Децентрализованные логи
 * Несовместимый формат времени
 * Неструктурированные данные
 * Не забыть формат логов обсудить с продуктовой командой
 
-Важно, чтобы на конкретную строку в логах можно было скинуть ссылку внутри команды на http ui, а не говорить - посмотри в таком-то контейнере по ssh.
+Важно, чтобы **на конкретную строку в логах была ссылка** на http ui, которую можно отправить внутри команды, а не говорить - "посмотри в таком-то контейнере по ssh".
 
-## Elastic Stack
+## Особенности логирования в Kubernetes
+В Kuber-e логи не могут храниться локально по умолчанию, так как это невозможно унифицировать - поды ограничены жизненным циклом, а хранилища разных дистрибутивов и сред кубера сильно различаются.
+
+Упрощённо обычная схема логирования в Kubernetes выглядит так: есть pod, в нём запущен контейнер, контейнер отправляет логи в stdout/stderr. Затем Docker(containerd) создаёт файл и записывает логи, которые затем может ротировать.
+
+Что следует делать в кубере:
+* Сохранять логи между деплоями - иначе новая версия не будет содержать сообщений предыдущей
+* Агрегировать логи со всех инстансов
+* Добавлять метаданные - неймспейсы, лейблы и тп
+* Парсить логи - Часто затраты на логи дороже приложения. Поэтому их нужно фильтровать, отбрасывать, оптимизировать и тп
+
+## Common stacks - EKF and Grafana-Loki
+
+В 2х словах - EKF мощнее, имеет полноценный поиск и более длительное хранение, а Графана-Локи, быстрее, проще и легковеснее, при этом не плодит сущности без необходимости (хранение данных в TSDB и отсутствие кибаны).
+
+См. https://habr.com/ru/company/southbridge/blog/517636/
+
+https://www.infracloud.io/blogs/logging-in-kubernetes-efk-vs-plg-stack/
+
+## Grafana Loki
+![Grafana Loki](https://grafana.com/static/img/logs/logs-loki-diagram.svg "Grafana Loki")
+
+Быстрее, легче, проще, переиспользует обязательный стек для метрик - графану и TSDB, вместо эластика и кибаны.
+
+TSDB отлично справляется с задачей хранения большого количества данных, временных рядов, но не предназначена для долгого хранения. Если по какой-то причине вам нужно хранить логи дольше двух недель, то лучше настроить их передачу в другую БД.
+
+С помощью DaemonSet на всех серверах кластера разворачивается агент — [Promtail](https://grafana.com/docs/loki/latest/clients/promtail/) **или Fluent Bit**. Агент собирает логи. Loki их забирает и хранит у себя в TSDB. К логам сразу добавляются метаданные, что удобно: можно фильтровать по Pods, namespaces, именам контейнеров и даже лейблам.
+
+Вместо полнотекстового поиска использует тэги.
+
+У Loki даже есть собственный язык запросов, он называется LogQL — по названию и по синтаксису напоминает PromQL в Prometheus. В интерфейсе Loki есть подсказки с запросами, поэтому не обязательно их знать наизусть.
+
+Используя фильтры, в Loki можно найти коды (“400”, “404” и любой другой); посмотреть логи со всей ноды; отфильтровать все логи, где есть слово “error”. Если нажать на лог, раскроется карточка со всей информацией по событию.
+
+## Elastic Stack (EFK or ELK)
+
+Прекрасная статья-гайд по EFK - https://habr.com/ru/post/548998/
+
 Компоненты стэка:
 ![Elastic Stack](https://www.cisco.com/c/dam/en/us/products/collateral/hyperconverged-infrastructure/hyperflex-hx-series/elastic-cloud-on-kubernetes-on-cisco-hx.docx/_jcr_content/renditions/elastic-cloud-on-kubernetes-on-cisco-hx_4.jpg "Elastic Stack")
 
 
 https://www.elastic.co/guide/en/welcome-to-elastic/current/stack-components.html
 
+
+* ELK == Elastic + Logstash + Kibana
+* EFK == Elastic + Fluentbit or FluentD + Kibana
+
+EFK используется чаще, так как Fluent лучше во всём. FluentBit вытесняет FluentD, так как написан на си, с урезанным функционалом, но имеет мем футпринт в 100 (!) раз меньше и покрывает большинство потребностей.
+
 ### Elasticsearch
 
-Elasticsearch  - распределённое хранилище с аналитическим и полнотекстовым поисковым движком на базе apache lucene. Оно превосходно себя проявляет в полуструктурированных данных типа логов
+Elasticsearch  - распределённое хранилище с аналитическим и полнотекстовым поисковым движком на базе apache lucene. Оно превосходно себя проявляет в полуструктурированных данных типа логов.
 
 Как правило в кластере эластика, данные хранятся в шардах (я сразу подумал о raid), распределённые по нодам. Кластер состоит из множества нод для улучшения доступности и отказоустойчивости. Любая нода может выполнять все роли, однако, в больших масштабах чаще им назначают только специальные.
 
-Виды нод - скорее роли, так как они как правило используются одновременно, если специально не разделены:
+Виды нод - скорее роли, так как они, как правило, используются одновременно, если специально не разделены:
 
 * **Master Nodes** – Управляет кластером: создаёт или удаляет индексы, отслеживает ноды в кластере, выбирает на какие ноды какие шарды аллоцировать. Требуется как минимум 3 и нечётного количества, чтобы не произошёл split brains. Определяют какой шард индекса на какую дата ноду записывать, а потом из них извлекают данные и склеивают воедино.
 * **Data Nodes** – Хранят данные и совершают CRUD-операции с данными
@@ -3430,23 +3467,31 @@ Elasticsearch  - распределённое хранилище с аналит
 * **Machine Learning** Nodes – Специализированные для machine learning.  Платная.
 * client node - сюда приходят данные в чистом виде
 
+Curator - Не нода, но приложение, управляющее индексами. Add, Remove, Merge, Snapshots and etc.
+
 
 
 ![Simple Elastic in K8s](https://res.cloudinary.com/practicaldev/image/fetch/s--pkQ3ztaH--/c_limit%2Cf_auto%2Cfl_progressive%2Cq_auto%2Cw_880/https://docs.aws.amazon.com/elasticsearch-service/latest/developerguide/images/za-2-az.png "Simple Elastic in K8s")
 
 ### Основные понятия Elasticsearch
+![Data stored in primary and replica shards](https://d33wubrfki0l68.cloudfront.net/897cff8650bb6436e7c7445dc75a0c75c43b87b9/fd391/assets/img/uploads/2020/04/image4.png "Data stored in primary and replica shards to spread the load across nodes and to improve data availability")
+
+![Data stored in an inverted index](https://d33wubrfki0l68.cloudfront.net/3cd49dace38491dd2e626219a81759b2a2e5c6b8/a0e72/assets/img/uploads/2020/04/image1-1024x564.png "Data stored in an inverted index")
+
+https://www.infracloud.io/blogs/logging-in-kubernetes-efk-vs-plg-stack/
+
 * **индекс** - не как в индекс БД, а похоже на саму базу данных. Состоит из разных шардов, которые распределены.
-* **тип** - грубо как таблица в RelDB, так как у типа есть набор заданных полей.
+* **тип** - грубо как таблица в реляционных DB, так как у типа есть набор заданных полей.
 * **документ** - документы одинаковых типов имеют одинаковый набор полей, по ним строят преобразователи
 * **кластер** - как обычно, набор нод
-* **узел** - узел с определённой
+* **узел** - узел с определённой ролью
 * **шарды** и копии - шард грубо уникальный набор документов. У каждого шарда есть replica, т.е. копии данных и мастер нода эластика старается сделать так, чтобы копия и оригинал документа не находились внутри одной ноды, а были распределены.
 * **разметку и типы данных** - маппинг в документе сопоставляет полям условно простые типы - условно схема БД. Есть определённый набор полей и важно, чтобы эластик знал какого типа данных эти поля, чтобы правильно проводить операции поиска - инты суммировать, в строках искать подстроки и символы и тп.
 * **обратный индекс** - Именно через него и работает поиск. Пример прямого индекса - оглавление: `Введение в эластик - страница 15`, пример обратного индекса - предметный указатель: `"elastic" можно найти в главах Введение в эластик,... `
 
 Индекс > Тип > Документ
 
-В одном индексе может быть много типов
+В одном индексе может быть много типов.
 
 ### ETL Systems (Logstash, Fluentd/bit)
 ETL stands for 
@@ -3456,12 +3501,14 @@ ETL stands for 
 
 It is a data integration process that combines data from multiple data sources into a single, consistent data store that is loaded into a data warehouse or other target system.
 
+Logstash, Fluentd/bit cтавятся на ноды с помощью даймонсетов и автоматом гребут все логи из директорий контейнеров, преобразуя и отправляя на хранение в другую систему.
+
 #### Logstash
 
 
 Logstash - это конвертер всех логов в формат необходимый для хранения. Похоже на node exporter для Prometheus, только преобразует для множества целей и приложений, не обязательно в эластик - например, можно отдавать логи в BI базу данных, rabbitmq или в pager duty для отправки уведомлений https://www.elastic.co/guide/en/logstash/current/output-plugins.html.
 
-То есть Logstash осуществляет:
+То есть Logstash (как и fluent) осуществляет:
 1. Парсинг
 2. Фильтрацию
 3. Преобразование
@@ -3481,45 +3528,15 @@ Application---Logstash---
 ##### Examples
 Говорят, люди его используют даже чтобы производить конвертацию данных из одного типа базы в другую.
 
-```
-input {
-  file{
-    path => "/var/logs/users.csv"
-    start_position => "beginning"
-    sincedb_path => "NULL"
-  }
-}
-filter {
-  csv{
-  autodetect_column_names => true
-  }
-  mutate {
-    convert => {
-      "Age" => "integer"
-      "Salary" => "float"
-      }
-    rename => { "FName" => "Firstname"
-                "LName" => "Lastname" }
-    gsub => [
-            "EmailId", "\.", "_"
-    ]
-    strip => ["Firstname", "Lastname"]
-    uppercase => [ "Gender" ]
-  }
-}
-output {...}
-stdout {...}
-```
-
 Распределение нод эластика по кластеру можно посмотреть в соответствующих примерах развёртки.
 Bitnami Elasticsearch Helm chart https://docs.bitnami.com/tutorials/run-elastic-stack-prometheus-kubernetes/
 ![Elastic Stack on Kubernetes Bitnami](https://docs.bitnami.com/tutorials/_next/static/images/es-deployment-architecture-909a8dbc52084e485e65e844cb5693a0.png.webp "Elastic Stack on Kubernetes Bitnami")
 
-Альтернатива от OpenEBS, показывающая работу с PV
+Альтернативная архитектура от OpenEBS, показывающая работу с PV
 https://openebs.io/docs/stateful-applications/elasticsearch
 ![ELK Stack with EBS example](https://openebs.io/docs/assets/files/Local-PV-Devices-elastic-deployment-d960b9d0ea5aecbde6c44c07d88dea8f.svg "ELK Stack with EBS example")
 
-#### Fluentd and Fluentbit
+#### Fluentd
 
 Opensource конкурент logstash - делают то же самое, но лучше.
 
@@ -3549,13 +3566,31 @@ Application--                      -----Security and business analytics
 
 Встроенная надёжность - сохранение на диске всех данных до тех пор, пока не придут в место назначения и будет пытаться с ним соединится.
 
-**Fluentbit** - похож на легковесный fluentd (0 зависимостей, вместо кучи руби), только больше нацеленный на быструю преобразованию и отправку, в то время как fluentd это полноценный самостоятельный инстанс централизованного сбора, который ждёт логи по сети ото всех, не только микросервисов.
+#### Fluentbit
+> Подробный пример настройки для понимания с поправкой на первую часть комментария https://habr.com/ru/post/548998/#comment_22915338, так как со второй я не согласен, так как nginx пишет логи сразу в stderr/out через симлинк, а не на диск.
+
+Урезанная СИ-имплементация FluentD, которая его вытесняет из-за лёгкости и скорости.
+https://docs.fluentbit.io/manual/about/fluentd-and-fluent-bit
+
+Интересно, что из Fluent Bit логи можно отправлять во Fluentd. Так как первый более легковесный и менее функциональный, через него можно собирать логи и отправлять во Fluentd, и уже там, с помощью дополнительных плагинов, их дообрабатывать и отправлять в хранилища.
 
 Fluentbit так же деплоится куда хочешь и у него также есть возможность собирать простейшие метрики среды типа CPU, RAM, Disk.
 
 Особый прикол, что в fluentbit есть sql-processor, который позволяет на ходу выполнять запросы, группируя данные, вычисляя средние и работая с таймштампами.
 
 **Используя аннотации** вида `fluentbit.io/parser: apache` можно тут же помечать как преобразовывать те или иные данные.
+
+
+![Fluentbit](https://habrastorage.org/r/w1560/webt/af/ca/2g/afca2g7bs7pircthqugrmsctdas.jpeg)
+
+`Input > Parser > Filter > Buffer > Routing > Output`
+
+1. Модуль Input собирает логи из файлов, служб systemd и даже из tcp-socket (надо только указать endpoint, и Fluent Bit начнёт туда ходить). Этих возможностей достаточно, чтобы собирать логи и с системы, и с контейнеров.
+В продакшене мы чаще всего используем плагины tail (его можно натравить на папку с логами) и systemd (ему можно сказать, из каких служб собирать логи).
+1. Модуль Parser приводит логи к общему виду. По умолчанию логи Nginx представляют собой строку. С помощью плагина эту строку можно преобразовать в JSON: задать поля и их значения https://habr.com/ru/post/548998/. С JSON намного проще работать, чем со строковым логом, потому что есть более гибкие возможности сортировки.
+1. Модуль Filter. На этом уровне отсеиваются ненужные логи. Например, на хранение отправляются логи только со значением “warning” или с определёнными лейблами. Отобранные логи попадают в буфер.
+1. Модуль Buffer. У Fluent Bit есть два вида буфера: буфер памяти и буфер на диске. Буфер — это временное хранилище логов, нужное на случай ошибок или сбоев. Всем хочется сэкономить на ОЗУ, поэтому обычно выбирают дисковый буфер. Но нужно учитывать, что перед уходом на диск логи всё равно выгружаются в память.
+1. Модуль Routing/Output содержит правила и адреса отправки логов. Как уже было сказано, логи можно отправлять в Elasticsearch, PostgreSQL или, например, Kafka.
 
 ### Kafka
 Часто используют кафку, если нужна гарантированная доставка.
@@ -3564,7 +3599,10 @@ EDA - Event Driven Architecture.
 
 См CAP теорема vs EDA
 
-## Logging in Kuber
+### Kibana
+Лютый визуализатор с кучей аналитики и дашбордов - полноценная BI система.
+
+## Подходы логгирования в Kuber-е
 В кубере существует, пожалуй, 3 основных подхода:
 1. From the App itself - само отправляет на бэкенд, но должно быть жёстко инструментировано соответственно.
 1. Sidecar - внутри пода вторым контейнером стоит, скажем, filebeat и забирает логи, отправляя их в бэкенд.
@@ -3591,8 +3629,17 @@ helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elast
 helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/kibana.values.yaml --namespace observability --set imageTag=7.17.3 kibana kibana
 helm repo add fluent https://fluent.github.io/helm-charts
 helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/fluent-bit.values.yaml --namespace observability --version 0.20.11 fluent-bit fluent/fluent-bit
-
 ```
+
+
+
+#### Установка EFK стека | Задание со ⭐
+Кажется, что проще всего переименовывать ключ поля с помощью того же modify https://docs.fluentbit.io/manual/v/1.9-pre/pipeline/filters/modify
+
+if you are ingesting straight to Elasticsearch, just change the name of the key that holds the timestamp with the option: Time_Key: https://github.com/fluent/fluent-bit/issues/628#issuecomment-518316428
+
+Time_Key When Logstash_Format is enabled, each record will get a new timestamp field. The Time_Key property defines the name of that field. Default - @timestamp https://docs.fluentbit.io/manual/pipeline/outputs/elasticsearch
+
 
 **Замечания к ДЗ**
 1. Microservices demo yaml - adcart v0.3.4 image tag

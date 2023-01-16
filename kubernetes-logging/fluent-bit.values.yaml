@@ -1,10 +1,22 @@
 # https://docs.fluentbit.io/manual/pipeline/outputs/elasticsearch
 image:
   tag: "1.9.10-debug"
-# backend:
-#   type: es
-#   es:
-#     host: elasticsearch-master
+backend:
+  type: es
+  es:
+    host: elasticsearch-master
+rawConfig: |
+  @INCLUDE fluent-bit-service.conf
+  @INCLUDE fluent-bit-input.conf
+  @INCLUDE fluent-bit-filter.conf
+  @INCLUDE fluent-bit-output.conf
+
+  [FILTER]
+    Name modify
+    Match *
+    Remove time
+    Remove @timestamp
+
 logLevel: debug
 config:
   outputs: |
@@ -14,7 +26,6 @@ config:
         Host elasticsearch-master
         Logstash_Format On
         Retry_Limit False
-        Write_Operation: index
     [OUTPUT]
         Name es
         Match host.*
@@ -22,4 +33,3 @@ config:
         Logstash_Format On
         Logstash_Prefix node
         Retry_Limit False
-        Write_Operation: index
