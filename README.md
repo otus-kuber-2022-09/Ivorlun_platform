@@ -3489,9 +3489,9 @@ https://www.infracloud.io/blogs/logging-in-kubernetes-efk-vs-plg-stack/
 * **разметку и типы данных** - маппинг в документе сопоставляет полям условно простые типы - условно схема БД. Есть определённый набор полей и важно, чтобы эластик знал какого типа данных эти поля, чтобы правильно проводить операции поиска - инты суммировать, в строках искать подстроки и символы и тп.
 * **обратный индекс** - Именно через него и работает поиск. Пример прямого индекса - оглавление: `Введение в эластик - страница 15`, пример обратного индекса - предметный указатель: `"elastic" можно найти в главах Введение в эластик,... `
 
-Индекс > Тип > Документ
+`Индекс > Тип > Документ` В одном индексе может быть много типов.
 
-В одном индексе может быть много типов.
+Elasticsearch accepts new data on HTTP query path "/_bulk". But it is also possible to serve Elasticsearch behind a reverse proxy on a subpath.
 
 ### ETL Systems (Logstash, Fluentd/bit)
 ETL stands for 
@@ -3634,21 +3634,111 @@ helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/fluen
 
 
 #### Установка EFK стека | Задание со ⭐
-Кажется, что проще всего переименовывать ключ поля с помощью того же modify https://docs.fluentbit.io/manual/v/1.9-pre/pipeline/filters/modify
+Удалять поля таймштампов, как предложено в лекции, не является решением однозначно.
+Тем более, что сейчас ошибки сохранения не возникает и все документы сохраняются автоматически.
 
-if you are ingesting straight to Elasticsearch, just change the name of the key that holds the timestamp with the option: Time_Key: https://github.com/fluent/fluent-bit/issues/628#issuecomment-518316428
+Первое решение, которое пришло само собой - не выбирать поле времени при создании индекса в кибане.
+Это не такая большая проблема, так как поля сохраняются и по ним можно будет фильтровать и строить дашборды, а также можно посмотреть какие поля в документах вообще присутствуют.
+```
+Create index pattern
+Timestamp field
+--- I don't want to use the time filter ---
+Select a timestamp field for use with the global time filter.
+```
 
-Time_Key When Logstash_Format is enabled, each record will get a new timestamp field. The Time_Key property defines the name of that field. Default - @timestamp https://docs.fluentbit.io/manual/pipeline/outputs/elasticsearch
+Конкретно у меня получилось 2 индекса при следующем конфиге по умолчанию:
+```
+  outputs: |
+    [OUTPUT]
+        Name es
+        Match kube.*
+        Host elasticsearch-master
+        Logstash_Format On
+        Retry_Limit False
+
+    [OUTPUT]
+        Name es
+        Match host.*
+        Host elasticsearch-master
+        Logstash_Format On
+        Logstash_Prefix node
+        Retry_Limit False
+```
+Этот конфиг дефолтный и важно, что он идёт в паре с инпутом - https://github.com/fluent/helm-charts/blob/e95de7f4b418bb401395aa58bb916e735bb78af4/charts/fluent-bit/values.yaml#L302
+
+И никаких проблем с доставкой логов в хранилище не появилось, как сказано в ДЗ - всё доходило исправно.
+
+Другой момент - что у меня в индексе "logstash" c `Match host.*` получилось, что присутствуют 3 поля времени:
+1. time - тип дата
+1. @timestamp - тип дата
+1. timestamp - тип номерное, unix epoch в ms
+
+Вывод из кибаны:
+```
+time - Jan 17, 2023 @ 18:57:32.194
+timestamp - 1,673,971,070
+```
+
+При этом поле с unix epoch появлялось только там, где есть `time`, поэтому сначала планировал его просто удалять.
+Но проверил, что эти времена отличаются на 20 секунд и приходит поле из микросервиса recommendationservice-server и решил его оставить, но для экономии места, всё же стоит удалять.
+
+Итого, остаётся разобраться только с time и @timestamp.
+
+Вижу 2 наиболее простые опции изменения полей - либо переименовать поле на этапе фильтрации, либо изменить имя поля прямо в самом конфиге аутпута (так можно).
 
 
-**Замечания к ДЗ**
-1. Microservices demo yaml - adcart v0.3.4 image tag
-2. Elastic helm repo
-  1. Has no fluent-bit
-  2. Is blocked even via vpn, so github repo is easier to use
-  3. Has problems with ingress kibana values - class should be removed
-3. xip.ip is dead, use nip.io instead
-4.
+##### Time_Key in es plugin config
+Если идти путём конфига output es, то необходимо все поля fluentbit-а переименовывать в `time`:
+> `Time_Key` When Logstash_Format is enabled, each record will get a new timestamp field. The Time_Key property defines the name of that field. Default - @timestamp` https://docs.fluentbit.io/manual/pipeline/outputs/elasticsearch
+
+Добавил в конфиги аутпутов `Time_Key time` и всё заработало как нужно с time.
+
+
+##### modify filter
+Вариант modify, который мне показался более универсальным https://docs.fluentbit.io/manual/v/1.9-pre/pipeline/filters/modify.
+
+
+
+### Prometheus
+`helm install --namespace observability prometheus-stack prometheus-community/kube-prometheus-stack`
+
+### Замечания к ДЗ
+
+1. **6 Слайд** Microservices demo yaml - опять несуществующий тэг образа у `gcr.io/google-samples/microservices-demo/adservice` - `v0.1.3`, должен быть - `v0.3.4`
+1. **7-8 Слайды** Elastic helm заблокирован через vpn и нативно в России, поэтому приходится ставить из исходников c github как из директории
+1. **14 Слайд** Неправильный сниппет ingress kibana values - class должен быть удалён, если nginx дефолтный ингресс
+1. **14-15 Слайды** xip.io уже давно не существует, нужно использовать, например, nip.io
+1. **17,21 Слайды** Конфигурация чарта такого вида устарела и не применяется больше - на обнаружение и исправление этого уходит много времени, так как путают приведённые в задании сообщения об ошибках другого вида.
+```
+backend:
+  type: es
+  es:
+    host: elasticsearch-master
+rawConfig: |
+  @INCLUDE fluent-bit-service.conf
+  ...
+```
+должно быть
+```
+config:
+  filters: |
+    [FILTER]
+        Name kubernetes
+        Match kube.*
+        Merge_Log On
+        Keep_Log Off
+        K8S-Logging.Parser On
+        K8S-Logging.Exclude On
+
+    [FILTER]
+        Name modify
+        Match *
+        Remove time
+        Remove @timestamp
+```
+1. **18 Слайд** Картинка некорректна - индексы по умолчанию называются уже по-другому
+1. **19 Слайд** Неверная информация - логи попадают все, в кибане можно определиться какой из вариантов поля использовать.
+
 
 ---
 ## GitOps
