@@ -5,3 +5,10 @@ tolerations:
     effect: NoSchedule
 nodeSelector:
   cloud.google.com/gke-nodepool: infra-pool
+resources:
+  requests:
+    cpu: "500m"
+    memory: "2Gi"
+  limits:
+    cpu: "500m"
+    memory: "2Gi"

@@ -3,3 +3,10 @@ ingress:
   path: /
   hosts:
     - kibana.35.242.232.63.nip.io
+resources:
+  requests:
+    cpu: "750m"
+    memory: "2Gi"
+  limits:
+    cpu: "750m"
+    memory: "2Gi"

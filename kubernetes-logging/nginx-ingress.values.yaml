@@ -20,5 +20,5 @@ controller:
               - nginx-ingress
           topologyKey: kubernetes.io/hostname
 
-  nodeSelector: 
+  nodeSelector:
     cloud.google.com/gke-nodepool: infra-pool

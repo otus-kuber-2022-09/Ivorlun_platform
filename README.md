@@ -3621,6 +3621,23 @@ https://sematext.com/blog/kubernetes-elasticsearch-autoscaling/
 * es-operator. This is an Operator that Zalando is using for a while in production. It’s open-source and it already supports autoscaling for the Enterprise Search use-case (i.e. data that isn’t time series). It can scale based on CPU or based on the number of shards per node. It can also automatically add replicas if you have more nodes than shards.
 
 ## Homework part
+Cluster role binding
+```
+kubectl create clusterrolebinding cluster-admin-binding \
+  --clusterrole cluster-admin \
+  --user $(gcloud config get-value account)
+```
+Installing ingress via manifest or helm
+```
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.5.1/deploy/static/provider/cloud/deploy.yaml
+
+or
+
+helm upgrade --install ingress-nginx ingress-nginx \
+  --repo https://kubernetes.github.io/ingress-nginx \
+  --namespace ingress-nginx --create-namespace \
+  -f ~/git/github/Ivorlun_platform/kubernetes-logging/nginx-ingress.values.yaml
+```
 
 ```
 git clone git@github.com:elastic/helm-charts.git && cd helm-charts && git co v7.17.3
@@ -3700,10 +3717,17 @@ timestamp - 1,673,971,070
 
 
 ### Prometheus
-`helm install --namespace observability prometheus-stack prometheus-community/kube-prometheus-stack`
+```
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm install --namespace observability --set namespaceOverride=observability prometheus-operator prometheus-community/kube-prometheus-stack
+```
 
 ### Замечания к ДЗ
 
+1. **2 Слайд** Предложенная конфигурация из равных нод default(1*(2cpu + 8ram)) + infra-pool(3*(2cpu + 8ram)) не позволяет выполнить домашнее задание корректно из-за нехватки CPU и requests Эластика вкупе с tolerations. Суммарно запрошенное - максимально доступные бесплатные ресурсы в GCP (8 ядер 32 гигабайта). При этом для каждой из ноды эластика с её requests 1 cpu 2gi ram выделяется 2 cpu 8 ram. Кажется, что можно исправить проблему проставив tolerations для kibana или prometheus, однако, в процессе ноды infra-pool должны уничтожаться, поэтому размещать на них что-либо - неправильно. То есть нужно исправить задание:
+  1. Изменить предложенную конфигурацию нод сделав, default: 4cpu >8ram infra-pool:3*(1cpu 4gb);
+  2. Уменьшить requests и limits эластика до 800ms, чтобы он не троттлил.
 1. **6 Слайд** Microservices demo yaml - опять несуществующий тэг образа у `gcr.io/google-samples/microservices-demo/adservice` - `v0.1.3`, должен быть - `v0.3.4`
 1. **7-8 Слайды** Elastic helm заблокирован через vpn и нативно в России, поэтому приходится ставить из исходников c github как из директории
 1. **14 Слайд** Неправильный сниппет ingress kibana values - class должен быть удалён, если nginx дефолтный ингресс
@@ -3738,6 +3762,7 @@ config:
 ```
 1. **18 Слайд** Картинка некорректна - индексы по умолчанию называются уже по-другому
 1. **19 Слайд** Неверная информация - логи попадают все, в кибане можно определиться какой из вариантов поля использовать.
+1. Неясно зачем ингресс деплоить на каждую ноду инфра пула
 
 
 ---
