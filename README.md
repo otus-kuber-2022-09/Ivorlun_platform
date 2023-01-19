@@ -3729,17 +3729,35 @@ timestamp - 1,673,971,070
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
 helm install --namespace observability --set namespaceOverride=observability prometheus-operator prometheus-community/kube-prometheus-stack
-helm install elastic-exporter prometheus-community/prometheus-elasticsearch-exporter --namespace observability --set es.uri=http://elasticsearch-master:9200 --set serviceMonitor.enabled=true
+helm install elastic-exporter prometheus-community/prometheus-elasticsearch-exporter --namespace observability -f ~/git/github/Ivorlun_platform/kubernetes-logging/elastic-exporter.values.yaml
+```
+Сходу пайплайн мониторинга не работает, так как прометеус не соединяется с сервис монитором экспортера.
+
+Проблема в том, что дефолтный прометеус оператор вбирает в себя только сервисмониторы с
+```yaml
+  serviceMonitorSelector:
+    matchLabels:
+      release: prometheus-operator
+```
+а prometheus-elasticsearch-exporter при `helm install --set serviceMonitor.enabled=true` имеет
+```yaml
+  labels:
+    release: elastic-exporter
+```
+Поэтому его нужно устанавливать используюя
+```yaml
+serviceMonitor:
+  enabled: true
+  labels:
+    release: prometheus-operator
+es:
+  uri: http://elasticsearch-master:9200
 ```
 
-Экспортер метрики выдаёт, всё ок.
-http://localhost:9108/metrics
+Помимо предоженного в ДЗ https://grafana.com/grafana/dashboards/4358-elasticsearch/,
+попробовал ещё дашборд https://grafana.com/grafana/dashboards/14191-elasticsearch-overview/ - очень крутой.
 
-Помимо предоженного в ДЗ https://grafana.com/grafana/dashboards/4358-elasticsearch/
 
-попробовал ещё дашборд https://grafana.com/grafana/dashboards/14191-elasticsearch-overview/.
-
-Почему-то не цепляет данные. Смотрю Сервис монитор.
 
 
 ### Замечания к ДЗ
