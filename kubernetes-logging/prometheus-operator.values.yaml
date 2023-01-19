@@ -1,0 +1,7 @@
+grafana:
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    path: /
+    hosts:
+      - grafana.34.159.98.212.nip.io

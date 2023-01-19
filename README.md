@@ -105,7 +105,7 @@ If a Pod's init container fails, the kubelet repeatedly restarts that init conta
 
 
 Помимо init-контейнеров существуют poststart и prestop хуки
-```
+```yaml
         lifecycle:
           preStop:
             exec:
@@ -155,7 +155,7 @@ If a HorizontalPodAutoscaler (or any similar API for horizontal scaling) is mana
 `selector: { app: nginx, tier: front, environment: stage }`
 
 стало:
-```
+```yaml
 selector:
   matchLabels:
     app: nginx
@@ -199,7 +199,7 @@ All existing Pods are killed before new ones are created when .spec.strategy.typ
 #### Blue-green deployment:
 1. Развертывание трех новых pod;
 2. Удаление трех старых pod;
-```
+```yaml
       strategy:
         type: RollingUpdate
         rollingUpdate:
@@ -210,7 +210,7 @@ All existing Pods are killed before new ones are created when .spec.strategy.typ
 1. Удаление одного старого pod;
 2. Создание одного нового pod;
 3. …
-```
+```yaml
       strategy:
         type: RollingUpdate
         rollingUpdate:
@@ -294,7 +294,7 @@ spec:
 Чтобы отследить успешность деплоя можно использовать `kubectl rollout status deployment/frontend`
 
 Описание pipeline, включающее в себя шаг развертывания и шаг отката, в самом простом случае может выглядеть так (синтаксис GitLab CI):
-```
+```yaml
 deploy_job:
   stage: deploy
   script:
@@ -352,7 +352,7 @@ Taints:             node-role.kubernetes.io/control-plane:NoSchedule
 ```
 То необходимо pod-у, который мы всё же хотим разместить на такой ноде прописать соответствующий  toleration - тогда pod сможет быть размещён.
 
-```
+```yaml
 kind: DaemonSet
 spec:
   template:
@@ -451,7 +451,7 @@ kubelet может опрашивать состояние контейнеро�
 
 ## Service ExternalName
 Services of type ExternalName map a Service to a DNS name, not to a typical selector such as my-service or cassandra. You specify these Services with the spec.externalName parameter.
-```
+```yaml
 apiVersion: v1
 kind: Service
 metadata:
@@ -673,7 +673,7 @@ Calico gives you a choice of dataplanes, including a pure Linux eBPF dataplane, 
 ## Homework part
 #### Осмысленность ps aux probe
 Полагаю, что причина по которой конфигурация вида
-```
+```yaml
 livenessProbe:
   exec:
     command:
@@ -942,7 +942,7 @@ kubectl apply -f - -n kube-system
 Далее в связи с багом https://github.com/metallb/metallb/issues/1597 вебхука пришлось удалить под контроллера после развёртки всех объектов metallb - иначе он не мог подцепить сертификат.
 
 После этого необходимо было заменить конфиг из домашки на новую версию конфига в виде CRD:
-```
+```yaml
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
@@ -1091,7 +1091,7 @@ Now copy the token and paste it into the Enter token field on the login screen.
 https://github.com/kubernetes/ingress-nginx/issues/2557#issuecomment-619513010
 
 Пробовал также через аннотацию `nginx.ingress.kubernetes.io/app-root: /dashboard/` и `spec.rules.http.paths.path: /dashboard/`, но это так же привело к ошибкам в js скриптах и относительных путях css дашборда:
-```
+```yaml
 # NOT WORKING!
 
   annotations:
@@ -1111,7 +1111,7 @@ https://ingress/dashboard/index.html, то он не может, просто у
 
 В общем получилось исправить следующей конфигурацией, наподобие примеру https://github.com/kubernetes/ingress-nginx/blob/controller-v1.6.0/docs/examples/rewrite/README.md:
 
-```
+```yaml
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /$2
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
@@ -1165,7 +1165,7 @@ https://docs.flagger.app/usage/deployment-strategies
 * web-canary
 
 Причём, ingress canary включается только при наличии в запросе header-а `canary=forsure`:
-```
+```yaml
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
     nginx.ingress.kubernetes.io/canary: "true"
@@ -1318,8 +1318,7 @@ through files. They are typically used to configure the application running in t
 ### subPath
 Можно использовать один и тот же вольюм в двух контейнерах, но при этом разбивать его на поддиректории.
 Например все данные приложения для бэкапа хранить в одном вольюме, но по разным маунтпоинтам и путям:
-```
-
+```yaml
       image: mysql
       env:
       - name: MYSQL_ROOT_PASSWORD
@@ -1370,7 +1369,7 @@ There are two ways to expose Pod and Container fields to a running Container:
 Together, these two ways of exposing Pod and Container fields are called the Downward API.
 
 Downward API volume:
-```
+```yaml
   volumes:
     - name: podinfo
       downwardAPI:
@@ -1406,7 +1405,7 @@ In 1.26, the following types of volume sources can be projected:
 * serviceAccountToken
 
 All sources are required to be in the same namespace as the Pod.
-```
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -1501,7 +1500,7 @@ A csi volume can be used in a Pod in three different ways:
 
 ### Claims As Volumes
 Вообще PVC это отдельный объект и может объявляться в самостоятельных манифестах, однако возможно объявление прямо в pod.spec:
-```
+```yaml
 spec:
   containers:
     - name: myfrontend
@@ -1662,7 +1661,7 @@ Transport Layer Security
 Крутая опция, позволяющая выбирать из всех ключей сикрета только определённые и маппить их по разным путям.
 
 You can also control the paths within the volume where Secret keys are projected. You can use the .spec.volumes[].secret.items field to change the target path of each key:
-```
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -1802,7 +1801,7 @@ When the Longhorn Manager is asked to create a volume, it creates a Longhorn Eng
 
 ### MinIO StatefulSet
 Интересно, что у pvc есть поле status, но остальные статусы отображаются аннотациями
-```
+```yaml
 Annotations:   pv.kubernetes.io/bind-completed: yes
                pv.kubernetes.io/bound-by-controller: yes
                volume.beta.kubernetes.io/storage-provisioner: rancher.io/local-path
@@ -1857,7 +1856,7 @@ total 16M
 1. **Так как секреты хранятся в base64, используем** `echo -n <var_name> | base64`
 1. Создаём секрет типа opaque, в который кладём эти закодированные переменные
 1. В поде меняем значение на переменную из ключа секрета:
-```
+```yaml
 env:
   - name: MINIO_ACCESS_KEY
     valueFrom:
@@ -1963,7 +1962,7 @@ E.g.: Читать эндпоинты, создавать PV и тп.
 
 Основное - это apiGroups и группы ресурсов, к которым мы даем доступ:
 
-```
+```yaml
 rules:
 - apiGroups: [""] # "" означает apiGroup под именем core или legacy
   resources: ["pods"]
@@ -2235,7 +2234,7 @@ example/
 Например:
 
 **Условия**:
-```
+```yaml
 {{- if .Values.server.persistentVolume.enabled }}
     persistentVolumeClaim:
       ...
@@ -2243,7 +2242,7 @@ example/
 ```
 
 **Циклы**:
-```
+```yaml
 {{- range $key, $value := .Values.server.annotations }}
   {{ $key: }} {{ $value }}
 {{- end }}
@@ -2278,7 +2277,7 @@ One of the powerful features of the template language is its concept of pipeline
 Ещё есть фунции default и lookup:
 * drink: {{ .Values.favorite.drink | default "tea" | quote }}
 * The `lookup` function can be used to look up resources in a running cluster.  When lookup returns a list of objects, it is possible to access the object list via the items field:
-```
+```yaml
 {{ range $index, $service := (lookup "v1" "Service" "mynamespace" "").items }}
     {{/* do something with each service */}}
 {{ end }}
@@ -2373,7 +2372,7 @@ helm upgrade --install hipster-shop kubernetes-templating/hipster-shop --namespa
 переменной указываем имя (название chart) этой зависимости.
 
 ##### Следующая аннотация позволяет развертывать новые Deployments при изменении ConfigMap:
-```
+```yaml
 kind: Deployment
 spec:
   template:
@@ -2383,7 +2382,7 @@ spec:
 ```
 
 ##### Отказ от удаления ресурсов с помощью политик ресурсов (PVC for example):
-```
+```yaml
 metadata:
   annotations:
     "helm.sh/resource-policy": keep
@@ -2402,7 +2401,7 @@ Encrypt your Secret into a SealedSecret, which is safe to store - even to a publ
 * Больше шаблонизации, в том числе и в values.yaml
 * Поддержка различных плагинов (helm-tiller, helm-secret, helm-diﬀ)
 * Главное - не увлечься шаблонизацией и сохранять прозрачность решения
-```
+```yaml
 releases:
 - name: prometheus-operator
   chart: stable/prometheus-operator
@@ -2486,7 +2485,7 @@ releases:
 3. Иметь публичное (доступное для LE) доменное имя или зону, которая будет подтверждать сертификат
 4. Создать ingress для целевого сервиса, в котором будут аннотации на эмитента сертификата и блок с секретом tls:
 
-```
+```yaml
   annotations:
     kubernetes.io/ingress.class: "nginx"
     #cert-manager.io/issuer: "letsencrypt-staging"
@@ -2499,7 +2498,7 @@ spec:
 5. Дальше работа идёт с 2мя видами эмитентов LE - staging и prod, потому что можно легко выйти за лимиты попыток подтверждения сертификатов у LE и нужно сначала протестировать корректность всей связки.
 
 Создаётся
-```
+```yaml
    apiVersion: cert-manager.io/v1
    kind: Issuer
    metadata:
@@ -2596,7 +2595,7 @@ Automated Certificate Management Environment (ACME) https://cert-manager.io/docs
 1. https://acme-staging-v02.api.letsencrypt.org/directory
 2. https://acme-v02.api.letsencrypt.org/directory
 
-```
+```yaml
 spec:
   acme:
     # The ACME server URL
@@ -2629,7 +2628,7 @@ spec:
 Важно, что имена и ссылки в ингрессах, сертификатах и секретах должны совпадать.
 
 После редактирования cert-manager.io/issuer
-```
+```yaml
 kind: Ingress
 metadata:
   annotations:
@@ -2663,7 +2662,7 @@ Error: unable to build kubernetes objects from release manifest: unable to recog
 ### Chartmuseum | Задание со ⭐
 #### Values auth
 Для того, чтобы включить загрузку с помощью логина и пароля:
-```
+```yaml
 env:
   open:
   DISABLE_API: false
@@ -2808,11 +2807,11 @@ requirements.yaml - устарел (https://helm.sh/blog/helm-3-preview-pt5/), �
 Я использовал чарт из хаба от Bitnami - https://artifacthub.io/packages/helm/bitnami/redis
 
 В values.yaml
-```
+```yaml
 redis:
   auth.enabled: false
 ```
-```
+```yaml
 redis:
   nameOverride: redis-cart
   fullnameOverride: redis-cart
@@ -2821,7 +2820,7 @@ redis:
     enabled: false
 ```
 И, так как для изменения имя сервиса, пришлось бы переписывать его (`name: {{ printf "%s-master" (include "common.names.fullname" .) }}`), в all-hipster-shop.yaml
-```
+```yaml
 image: gcr.io/google-samples/microservices-demo/cartservice:v0.1.3
 env:
 - name: REDIS_ADDR
@@ -3047,7 +3046,7 @@ https://www.dmosk.ru/miniinstruktions.php?mini=prometheus-stack-docker
 2. Компонент AlertManager, который получает сообщения и дальше решает, что с ними делать на основе их метаданных (лейблов) - отправить ли дальше и кому или заглушить. При этом AlertManager может масштабироваться горизонтально с минимальной конфигурацией.
 
 Prometheus alerting rule example:
-```
+```yaml
 groups:
 - name: etcd
   rules:
@@ -3063,7 +3062,7 @@ groups:
 ```
 
 Like metrics endpoints, AlertManager services can also be autodetected using different methods: DNS discovery, Consul, etc…
-```
+```yaml
 alerting:
   alertmanagers:
   - scheme: http
@@ -3079,7 +3078,7 @@ alerting:
   * For example if a cluster is down and completely unreachable, then there is no point notifying the status of the individual microservices it contains.
 * Alerts can be forwarded to ‘receivers’, this is, notification gateways like Slack, email, PagerDuty, webhook, etc.
 
-```
+```yaml
 global:
   resolve_timeout: 5m
 route:
@@ -3235,7 +3234,7 @@ The **USE** method is **for resources** and the **RED** method is **for my servi
 
 Datasources
 
-Dashboards
+Dashboards https://grafana.com/grafana/dashboards/
 
 plugins == panels
 
@@ -3256,7 +3255,7 @@ helm install prometheus prometheus-community/prometheus
 helm install traefik traefik/traefik --set metrics.prometheus.service.enabled=true
 ```
 После чего можно отредактировать cm prometheus-server, где добавить scrape job-у:
-```
+```yaml
   - job_name: 'traefik'
     static_configs:
     - targets: ['traefik-metrics:9100]
@@ -3270,7 +3269,7 @@ Config поддерживает кучу директив (https://prometheus.io
 * scrape_interval, scrape_limit, scrape_timeout: позволяют балансировать между точностью, надёжностьб и нагрузкой.
 
 Можно также настраивать автомониторинг через SD связки k8s-prom, просто добавляя такие аннотации к объектам и оператор сам будет генерировать конфиг job-ы по указанным путям.
-```
+```yaml
 annotations:
   prometheus.io/port: 9216
   prometheus.io/scrape: true
@@ -3323,7 +3322,7 @@ NGINX exposes a handful of metrics via the stub_status page - https://nginx.org/
 Стоит отметить, что по умолчанию, Prometheus будет подцеплять ServiceMonitors только из текущего namespace. Чтобы использовать ServiceMonitors из других namespaces, нужно изменить поле `spec.serviceMonitorNamespaceSelector` в CR Prometheus.
 
 **Важно!** Не только для подов но и для самого сервиса необходимо обязательно создать лейблы, так как именно по ним сервис монитор и будет выбирать таргет.
-```
+```yaml
 kind: Service
 metadata:
   name: nginx-clusterip
@@ -3621,6 +3620,8 @@ https://sematext.com/blog/kubernetes-elasticsearch-autoscaling/
 * es-operator. This is an Operator that Zalando is using for a while in production. It’s open-source and it already supports autoscaling for the Enterprise Search use-case (i.e. data that isn’t time series). It can scale based on CPU or based on the number of shards per node. It can also automatically add replicas if you have more nodes than shards.
 
 ## Homework part
+
+
 Cluster role binding
 ```
 kubectl create clusterrolebinding cluster-admin-binding \
@@ -3641,8 +3642,7 @@ helm upgrade --install ingress-nginx ingress-nginx \
 
 ```
 git clone git@github.com:elastic/helm-charts.git && cd helm-charts && git co v7.17.3
-kubectl create ns observability
-helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elasticsearch.values.yaml --namespace observability --set imageTag=7.17.3 elasticsearch elasticsearch
+helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elasticsearch.values.yaml --namespace observability --set imageTag=7.17.3 elasticsearch elasticsearch  --create-namespace
 helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/kibana.values.yaml --namespace observability --set imageTag=7.17.3 kibana kibana
 helm repo add fluent https://fluent.github.io/helm-charts
 helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/fluent-bit.values.yaml --namespace observability --version 0.20.11 fluent-bit fluent/fluent-bit
@@ -3664,7 +3664,7 @@ Select a timestamp field for use with the global time filter.
 ```
 
 Конкретно у меня получилось 2 индекса при следующем конфиге по умолчанию:
-```
+```yaml
   outputs: |
     [OUTPUT]
         Name es
@@ -3713,6 +3713,14 @@ timestamp - 1,673,971,070
 
 ##### modify filter
 Вариант modify, который мне показался более универсальным https://docs.fluentbit.io/manual/v/1.9-pre/pipeline/filters/modify.
+```yaml
+    [FILTER]
+        Name modify
+        Match *
+        Rename time @timestamp
+```
+В итоге сработал, но по какой-то причине, не полностью - так как поле time всё равно присутствовало в очень небольшом проценте логов.
+Долго разбирался, менял тэги и т.п., но решил более не тратить время, так как рабочего варианта выше достаточно.
 
 
 
@@ -3721,7 +3729,18 @@ timestamp - 1,673,971,070
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
 helm install --namespace observability --set namespaceOverride=observability prometheus-operator prometheus-community/kube-prometheus-stack
+helm install elastic-exporter prometheus-community/prometheus-elasticsearch-exporter --namespace observability --set es.uri=http://elasticsearch-master:9200 --set serviceMonitor.enabled=true
 ```
+
+Экспортер метрики выдаёт, всё ок.
+http://localhost:9108/metrics
+
+Помимо предоженного в ДЗ https://grafana.com/grafana/dashboards/4358-elasticsearch/
+
+попробовал ещё дашборд https://grafana.com/grafana/dashboards/14191-elasticsearch-overview/.
+
+Почему-то не цепляет данные. Смотрю Сервис монитор.
+
 
 ### Замечания к ДЗ
 
@@ -3733,7 +3752,7 @@ helm install --namespace observability --set namespaceOverride=observability pro
 1. **14 Слайд** Неправильный сниппет ingress kibana values - class должен быть удалён, если nginx дефолтный ингресс
 1. **14-15 Слайды** xip.io уже давно не существует, нужно использовать, например, nip.io
 1. **17,21 Слайды** Конфигурация чарта такого вида устарела и не применяется больше - на обнаружение и исправление этого уходит много времени, так как путают приведённые в задании сообщения об ошибках другого вида.
-```
+```yaml
 backend:
   type: es
   es:
@@ -3743,7 +3762,7 @@ rawConfig: |
   ...
 ```
 должно быть
-```
+```yaml
 config:
   filters: |
     [FILTER]
@@ -3762,8 +3781,17 @@ config:
 ```
 1. **18 Слайд** Картинка некорректна - индексы по умолчанию называются уже по-другому
 1. **19 Слайд** Неверная информация - логи попадают все, в кибане можно определиться какой из вариантов поля использовать.
-1. Неясно зачем ингресс деплоить на каждую ноду инфра пула
-
+1. Неясно зачем ингресс деплоить на каждую ноду инфра пула - это бессмысленно и предложенный вариант не гарантирует деплой на каждую ноду, так как это деплоймент и 2 ингресса могут встать на одну даже с весами.
+1. Почему FluentBit не устанавливается на infra-pool ноды по заданию?
+Он же тогда не сможет читать один из 2х дефолтных input-ов с нод:
+```yaml
+  inputs: |
+    [INPUT]
+        Name systemd
+        Tag host.*
+        Systemd_Filter _SYSTEMD_UNIT=kubelet.service
+        Read_From_Tail On
+```
 
 ---
 ## GitOps
@@ -3806,7 +3834,7 @@ https://cloud.yandex.ru/training/training-pro
 
 Используются 2 аннотации в описании ингресса - класс и имя статического айпи, которое указывали при его создании.
 
-```
+```yaml
 kind: Ingress
 metadata:
   name: web-ingress
@@ -3833,12 +3861,12 @@ To promote the allocated IP to static, you can update the Service manifest:
 
 ## Yaml dot and nested element
 Не стоит забывать, что такая запись:
-```
+```yaml
 redis:
   auth.enabled: false
 ```
 Не равнозначна такой:
-```
+```yaml
 redis:
   auth:
     enabled: false
@@ -3924,16 +3952,7 @@ https://habr.com/ru/company/selectel/blog/303190/
 ## What is cgroup v2?
 FEATURE STATE: Kubernetes v1.25 [stable]
 
-cgroup v2 is the next version of the Linux cgroup API. cgroup v2 provides a unified control system with enhanced resource management capabilities.
-
-cgroup v2 offers several improvements over cgroup v1, such as the following:
-
-* Single unified hierarchy design in API
-* Safer sub-tree delegation to containers
-* Newer features like Pressure Stall Information (точнее отслеживает информацию о перегрузе железа и позволяет использовать ресурсы почти на 100%, отсекая ненужное и перераспределяя нагрузку)
-* Enhanced resource allocation management and isolation across multiple resources
-    * Unified accounting for different types of memory allocations (network memory, kernel memory, etc)
-    * Accounting for non-immediate resource changes such as page cache write backs
+cgroup v2 is the next version of the Linux cgroup API. cgroup v2 provides a unified```
 
 Some Kubernetes features exclusively use cgroup v2 for enhanced resource management and isolation. For example, the MemoryQoS feature improves memory QoS (Quality-of-Service for Memory Resources) and relies on cgroup v2 primitives.
 
