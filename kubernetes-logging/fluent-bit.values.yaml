@@ -1,4 +1,11 @@
 # https://docs.fluentbit.io/manual/pipeline/outputs/elasticsearch
+iamge:
+  tag: 1.9.10-debug
+logLevel: trace
+
+rbac:
+  nodeAccess: true
+
 config:
   outputs: |
     [OUTPUT]
@@ -8,6 +15,7 @@ config:
         Logstash_Format On
         Retry_Limit False
         Time_Key time
+        Trace_Error On
 
     [OUTPUT]
         Name es
@@ -17,3 +25,4 @@ config:
         Logstash_Prefix node
         Retry_Limit False
         Time_Key time
+        Trace_Error On

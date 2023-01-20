@@ -3720,7 +3720,7 @@ timestamp - 1,673,971,070
         Rename time @timestamp
 ```
 В итоге сработал, но по какой-то причине, не полностью - так как поле time всё равно присутствовало в очень небольшом проценте логов.
-Долго разбирался, менял тэги и т.п., но решил более не тратить время, так как рабочего варианта выше достаточно.
+Долго разбирался с дебаг образом, менял тэги и т.п., но решил более не тратить время, так как рабочего варианта выше достаточно.
 
 
 
@@ -3758,7 +3758,25 @@ es:
 попробовал ещё дашборд https://grafana.com/grafana/dashboards/14191-elasticsearch-overview/ - очень крутой.
 
 
+Попробуем сделать drain второй ноды из infra-pool, и увидим что PDB (PodDisruptionBudget) не дает этого сделать.
+```
+❯ k drain --ignore-daemonsets gke-logging-hw-infra-pool-bcd16e62-h37r
+node/gke-logging-hw-infra-pool-bcd16e62-h37r cordoned
+Warning: ignoring DaemonSet-managed Pods: kube-system/pdcsi-node-5ctgf, observability/prometheus-operator-prometheus-node-exporter-snpm8
+evicting pod observability/elasticsearch-master-0
+error when evicting pods/"elasticsearch-master-0" -n "observability" (will retry after 5s): Cannot evict pod as it would violate the pod's disruption budget.
+```
 
+После удаления пода вручную метрики Prometheus перестали собираться, так как у сервиса, к которому
+подключается exporter, пропали все endpoint.
+Сделаем вывод - узнавать о проблемах с ElasticSearch в нашем сценарии (replication factor = 1: 1 shard + 1 replica на индекс) желательно на этапе выхода из строя первой ноды в кластере.
+
+Несколько метрик, которые рекомендуется отслеживать при эксплуатации ElasticSearch (https://habr.com/ru/company/yoomoney/blog/358550/):
+* unassigned_shards - количество shard, для которых не нашлось подходящей ноды, их наличие сигнализирует о проблемах
+* jvm_memory_usage - высокая загрузка (в процентах от выделенной памяти) может привести к замедлению работы кластера
+* number_of_pending_tasks - количество задач, ожидающих выполнения. Значение метрики, отличное от нуля, может сигнализировать о наличии проблем внутри кластера
+
+`EFK | nginx ingress` - В начале ДЗ требовалось поставить ингресс контроллеры на инфра ноды, но я решил так не делать, иначе у меня не влезали по ресурсам компоненты в кластер даже после ужимания.  Поэтому у меня не было проблем с тем, что на эти ноды не встал флюентбит даймонсет и всё работало из коробки. То ест сразу на дефолтной ноде стоял и ингресс и флуент бит.
 
 ### Замечания к ДЗ
 
@@ -3824,7 +3842,7 @@ https://cloud.yandex.ru/training/training-pro
 ## В манифестах нужно быть предельно внимательным к регистру и к автозаменам.
 Ошибся как всегда на этой игре с именами полей и именами сущностей:
 
-    `{{ if eq .Values.service.type "NodePort" }}nodePort: {{ .Values.service.NodePort }}{{ end }}`
+`{{ if eq .Values.service.type "NodePort" }}nodePort: {{ .Values.service.NodePort }}{{ end }}`
 1. NodePort - spec.type
 1. nodePort - spec.ports
 1. .Values.service.NodePort - ну а это переменная с произвольным именем из values
@@ -4002,6 +4020,11 @@ https://blog.kintone.io/entry/2022/03/08/170206#How-Kubernetes-manages-requests-
 Так что общее правило - сначала всё подготовить для основного объекта, а только потом задеплоить его.
 
 Вообще полезная страница, по ней можно делать финальную сверку своих конфигураций.
+
+---
+### Disruptions (PDB and cluster and application owners separations)
+Pod Disruption budget - позволяет защитить поды от преднамеренного удаления, требуя минимальное количество инстансов в кластере. Очень полезно для приложений типа etcd, Эластика, где есть шардирование и распределённые реплики, где удаление нескольких нод может повлечь повреждение всех данных кластера.
+---
 
 ## Kubectl exec
 -- в kubectl exec нужен для того чтобы cli мог понять где аргументы cli, а где аргументы команды передаваемые в контейнер!
