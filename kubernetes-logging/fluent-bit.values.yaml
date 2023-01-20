@@ -6,6 +6,12 @@ logLevel: trace
 rbac:
   nodeAccess: true
 
+tolerations:
+  - key: node-role
+    operator: Equal
+    value: infra
+    effect: NoSchedule
+
 config:
   outputs: |
     [OUTPUT]
