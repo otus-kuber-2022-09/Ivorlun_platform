@@ -1,7 +1,19 @@
-# https://docs.fluentbit.io/manual/pipeline/outputs/elasticsearch
-iamge:
-  tag: 1.9.10-debug
-logLevel: trace
+# https://docs.fluentbit.io/
+# iamge:
+#   tag: 2.0.8-debug
+logLevel: info
+
+env:
+- name: ES_USERNAME
+  valueFrom:
+    secretKeyRef:
+      key: username
+      name: elasticsearch-master-credentials
+- name: ES_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      key: password
+      name: elasticsearch-master-credentials
 
 rbac:
   nodeAccess: true
@@ -13,22 +25,65 @@ tolerations:
     effect: NoSchedule
 
 config:
+  # inputs: |
+  #   [INPUT]
+  #       Name tail
+  #       Path /var/log/containers/*.log
+  #       multiline.parser docker, cri
+  #       Tag kube.*
+  #       Mem_Buf_Limit 5MB
+  #       Skip_Long_Lines On
+  #   [INPUT]
+  #       Name systemd
+  #       Tag host.*
+  #       Systemd_Filter _SYSTEMD_UNIT=kubelet.service
+  #       Read_From_Tail On
+
+  filters: |
+    [FILTER]
+        Name kubernetes
+        Match kube.*
+        Merge_Log On
+        Keep_Log Off
+        K8S-Logging.Parser On
+        K8S-Logging.Exclude On
+    [FILTER]
+        Name modify
+        Match *
+        Rename time @timestamp
+
   outputs: |
     [OUTPUT]
         Name es
         Match kube.*
+        HTTP_User ${ES_USERNAME}
+        HTTP_Passwd ${ES_PASSWORD}
         Host elasticsearch-master
+        Index containers
         Logstash_Format On
+        Port  9200
         Retry_Limit False
         Time_Key time
+        tls On
+        tls.verify Off
         Trace_Error On
+        Replace_Dots    On
+        Suppress_Type_Name On
 
     [OUTPUT]
         Name es
         Match host.*
         Host elasticsearch-master
+        HTTP_User ${ES_USERNAME}
+        HTTP_Passwd ${ES_PASSWORD}
+        Index kubelet
         Logstash_Format On
         Logstash_Prefix node
+        Port  9200
         Retry_Limit False
         Time_Key time
+        tls On
+        tls.verify Off
         Trace_Error On
+        Replace_Dots    On
+        Suppress_Type_Name On

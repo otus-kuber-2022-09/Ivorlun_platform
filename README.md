@@ -3628,12 +3628,8 @@ kubectl create clusterrolebinding cluster-admin-binding \
   --clusterrole cluster-admin \
   --user $(gcloud config get-value account)
 ```
-Installing ingress via manifest or helm
+Installing ingress via helm
 ```
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.5.1/deploy/static/provider/cloud/deploy.yaml
-
-or
-
 helm upgrade --install ingress-nginx ingress-nginx \
   --repo https://kubernetes.github.io/ingress-nginx \
   --namespace ingress-nginx --create-namespace \
@@ -3641,11 +3637,15 @@ helm upgrade --install ingress-nginx ingress-nginx \
 ```
 
 ```
-git clone git@github.com:elastic/helm-charts.git && cd helm-charts && git co v7.17.3
-helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elasticsearch.values.yaml --namespace observability --set imageTag=7.17.3 elasticsearch elasticsearch  --create-namespace
-helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/kibana.values.yaml --namespace observability --set imageTag=7.17.3 kibana kibana
+git clone git@github.com:elastic/helm-charts.git && cd helm-charts && git co v8.5.1
+helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/elasticsearch.values.yaml --namespace observability --set imageTag=8.5.1 elasticsearch elasticsearch  --create-namespace
+helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/kibana.values.yaml --namespace observability --set imageTag=8.5.1 kibana kibana
+
+kubectl get secrets --namespace=observability elasticsearch-master-credentials -ojsonpath='{.data.password}' | base64 -d
+kubectl get secrets --namespace=observability elasticsearch-master-credentials -ojsonpath='{.data.username}' | base64 -d
+
 helm repo add fluent https://fluent.github.io/helm-charts
-helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/fluent-bit.values.yaml --namespace observability --version 0.20.11 fluent-bit fluent/fluent-bit
+helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/fluent-bit.values.yaml --namespace observability --version 0.21.7 fluent-bit fluent/fluent-bit
 ```
 
 
@@ -3697,7 +3697,7 @@ timestamp - 1,673,971,070
 ```
 
 При этом поле с unix epoch появлялось только там, где есть `time`, поэтому сначала планировал его просто удалять.
-Но проверил, что эти времена отличаются на 20 секунд и приходит поле из микросервиса recommendationservice-server и решил его оставить, но для экономии места, всё же стоит удалять.
+Но проверил, что эти времена отличаются на 20 секунд и приходит поле из микросервиса recommendationservice-server и решил его оставить, хотя, для экономии места, всё же стоит удалять.
 
 Итого, остаётся разобраться только с time и @timestamp.
 
@@ -3728,7 +3728,7 @@ timestamp - 1,673,971,070
 ```
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
-helm install --namespace observability --set namespaceOverride=observability prometheus-operator prometheus-community/kube-prometheus-stack
+helm install --namespace observability --set namespaceOverride=observability -f ~/git/github/Ivorlun_platform/kubernetes-logging/prometheus-operator.values.yaml prometheus-operator prometheus-community/kube-prometheus-stack
 helm install elastic-exporter prometheus-community/prometheus-elasticsearch-exporter --namespace observability -f ~/git/github/Ivorlun_platform/kubernetes-logging/elastic-exporter.values.yaml
 ```
 Сходу пайплайн мониторинга не работает, так как прометеус не соединяется с сервис монитором экспортера.
@@ -3776,15 +3776,9 @@ error when evicting pods/"elasticsearch-master-0" -n "observability" (will retry
 * jvm_memory_usage - высокая загрузка (в процентах от выделенной памяти) может привести к замедлению работы кластера
 * number_of_pending_tasks - количество задач, ожидающих выполнения. Значение метрики, отличное от нуля, может сигнализировать о наличии проблем внутри кластера
 
-`EFK | nginx ingress` - В начале ДЗ требовалось поставить ингресс контроллеры на инфра ноды, но я решил так не делать, иначе у меня не влезали по ресурсам компоненты в кластер даже после ужимания.  Поэтому у меня не было проблем с тем, что на эти ноды не встал флюентбит даймонсет и всё работало из коробки. То ест сразу на дефолтной ноде стоял и ингресс и флуент бит.
+`EFK | nginx ingress` - В начале ДЗ требовалось поставить ингресс контроллеры на инфра ноды, но я решил так не делать, иначе у меня не влезали по ресурсам компоненты в кластер даже после ужимания.  Поэтому у меня был флюентбит даймонсет на дефолтной ноде вместе с ингрессом и всё работало из коробки.
 
 
-
-По прошествию примерно 10-20 минут логи прекращают поступать в эластик, возможно из-за того, что флюент не может очистить индекс - failed to flush chunk.
-
-Также, несмотря на то, что флюент установлен на всех нодах и по идее должен читать все контейнеры, из ингресс контроллера он не читает - вряд ли это проблема неймспейсов, с учётом того, что он лезет на хост.
-
-Также не работает корректно конфиг ингресс контроллера, при выборе джейсон формата - похоже какой-то косяк с кавычками или вроде того, так как там написано, что значения конфига это стринги.
 
 
 

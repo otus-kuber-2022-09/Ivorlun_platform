@@ -4,4 +4,4 @@ grafana:
     ingressClassName: nginx
     path: /
     hosts:
-      - grafana.34.159.98.212.nip.io
+      - grafana.34.90.233.120.nip.io
