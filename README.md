@@ -3808,7 +3808,7 @@ error when evicting pods/"elasticsearch-master-0" -n "observability" (will retry
 
 ```
 helm repo add grafana https://grafana.github.io/helm-charts && helm repo update
-helm upgrade --install loki-stack --namespace=observaility grafana/loki-stack -f ~/git/github/Ivorlun_platform/kubernetes-logging/loki-stack.values.yaml
+helm upgrade --install loki-stack --namespace=observability grafana/loki-stack -f ~/git/github/Ivorlun_platform/kubernetes-logging/loki-stack.values.yaml
 ```
 
 ### Замечания к ДЗ
