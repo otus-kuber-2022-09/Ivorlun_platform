@@ -5,3 +5,20 @@ grafana:
     path: /
     hosts:
       - grafana.34.90.233.120.nip.io
+  defaultDashboardsTimezone: Europe/Moscow
+
+# https://github.com/grafana/helm-charts/tree/loki-stack-2.8.9/charts/loki-stack#deploy-grafana-to-your-cluster
+  additionalDataSources:
+  - name: loki-stack
+    access: proxy
+    basicAuth: False
+    # basicAuthPassword: ${LOKI_PASSWORD}
+    # basicAuthUser: admin
+    type: loki
+    url: http://loki-stack:3100
+  # env:
+  # - name: LOKI_PASSWORD
+  #   valueFrom:
+  #     secretKeyRef:
+  #       key: admin-password
+  #       name: loki-grafana

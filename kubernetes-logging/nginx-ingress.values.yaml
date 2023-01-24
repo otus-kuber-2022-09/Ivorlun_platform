@@ -14,34 +14,9 @@ controller:
       "req_id": "$req_id", "server_protocol":"$server_protocol", "host": "$host", "uri": "$uri",
       "args": "$args", "x-forward-for": "$proxy_add_x_forwarded_for"}'
 
-  # replicaCount: 3
-
-  # metrics:
-  #   enabled: true
-  #   serviceMonitor:
-  #     enabled: true
-  #     additionalLabels:
-  #       release: prometheus-operator
-
-  # tolerations:
-  #   - key: node-role
-  #     operator: Equal
-  #     value: infra
-  #     effect: NoSchedule
-
-  # affinity:
-  #   podAntiAffinity:
-  #     preferredDuringSchedulingIgnoredDuringExecution:
-  #     - weight: 100
-  #       podAffinityTerm:
-  #         labelSelector:
-  #           matchExpressions:
-  #           - key: app
-  #             operator: In
-  #             values:
-  #             - nginx-ingress
-  #         topologyKey: kubernetes.io/hostname
-
-  # nodeSelector:
-  #   cloud.google.com/gke-nodepool: infra-pool
-
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: prometheus-operator

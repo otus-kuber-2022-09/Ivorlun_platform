@@ -2362,6 +2362,8 @@ A chart can be either an 'application' or a 'library' chart.
 Эта схема называется 3-way merge. Таким образом Helm приведет конфигурацию приложения к состоянию, которое описано в git, но не тронет другие изменения. Т. е., если у вас в кластере есть какая-то сущность, которая трансформирует ваши примитивы (например, Service Mesh), то Helm отнесется к ним бережно.
 
 ### Subcharts
+**Важно!** Уже забыл, Если чарт содержит другие чарты в зависимостях, то их values можно конфигурировать через префикс имени чарта!
+
 * A subchart is considered "stand-alone", which means a subchart can never explicitly depend on its parent chart.
 * For that reason, a subchart cannot access the values of its parent.
 * A parent chart can override values for subcharts.
@@ -3420,6 +3422,10 @@ https://www.cncf.io/blog/2021/10/25/prometheus-definitive-guide-part-iii-prometh
 https://www.infracloud.io/blogs/logging-in-kubernetes-efk-vs-plg-stack/
 
 ## Grafana Loki
+Локи - хранилище оптимизированное под хранение логов. Не индексирует сами данные, а лишь представляет набор логов как поток, которому в соответствие ставится лейбл, по которым уже строится индекс. Поэтому от грамотных лейблов зависит построение качественного и компактного индекса.
+
+Agent (also called a client) собирает логи, превращая их в потоки и потравляет их в Loki через HTTP API. Promtail agent создан спеицально для Loki, однако можно использовать и множество других.
+
 ![Grafana Loki](https://grafana.com/static/img/logs/logs-loki-diagram.svg "Grafana Loki")
 
 Быстрее, легче, проще, переиспользует обязательный стек для метрик - графану и TSDB, вместо эластика и кибаны.
@@ -3779,9 +3785,31 @@ error when evicting pods/"elasticsearch-master-0" -n "observability" (will retry
 `EFK | nginx ingress` - В начале ДЗ требовалось поставить ингресс контроллеры на инфра ноды, но я решил так не делать, иначе у меня не влезали по ресурсам компоненты в кластер даже после ужимания.  Поэтому у меня был флюентбит даймонсет на дефолтной ноде вместе с ингрессом и всё работало из коробки.
 
 
+В описании домашки используется старый лейбл для поиска запросов в kibana, поэтому изменил его на соответствующий текущим для ingress-nginx - KQL:
+`kubernetes.labels.app_kubernetes_io/name : ingress-nginx and status : 20*`
 
 
+### Grafana Loki
 
+Если в первом случае у нас было так:
+
+`logs > /var/log/... on nodes > fluentbit daemonset > elastic > kibana`
+
+
+То в данном случае это выглядит как:
+
+`logs > /var/log/... on nodes > promtail daemonset > loki > grafana`
+
+**Важно!** Уже забыл, Если чарт содержит другие чарты в зависимостях, то их values можно конфигурировать через префикс имени чарта!
+
+Поэтому идём в эти чарты и смотрим какие tolerations и :
+* https://github.com/grafana/helm-charts/blob/promtail-6.8.1/charts/promtail/values.yaml
+* https://github.com/grafana/loki/blob/v2.7.1/production/helm/loki/values.yaml
+
+```
+helm repo add grafana https://grafana.github.io/helm-charts && helm repo update
+helm upgrade --install loki-stack --namespace=observaility grafana/loki-stack -f ~/git/github/Ivorlun_platform/kubernetes-logging/loki-stack.values.yaml
+```
 
 ### Замечания к ДЗ
 
