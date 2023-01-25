@@ -3830,8 +3830,9 @@ helm upgrade --install loki-stack --namespace=observability grafana/loki-stack -
 
 Причём переменными могут быть не только данные, но и сами источники, временные отрезки и тп.
 
+#### Host logging | Задание со ⭐
 
-
+Для того, чтобы читать логи со всего хоста необходимо использовать systemd input для fluent-bit https://docs.fluentbit.io/manual/pipeline/inputs/systemd.
 
 
 ### Замечания к ДЗ
