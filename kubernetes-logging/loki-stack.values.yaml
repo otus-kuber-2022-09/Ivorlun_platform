@@ -1,6 +1,3 @@
-# loki:
-#   loki:
-
 promtail:
   tolerations:
     - key: node-role.kubernetes.io/master

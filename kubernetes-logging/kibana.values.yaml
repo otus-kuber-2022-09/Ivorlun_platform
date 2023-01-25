@@ -2,7 +2,7 @@ ingress:
   enabled: true
   path: /
   hosts:
-    - kibana.34.90.233.120.nip.io
+    - kibana.35.204.72.21.nip.io
 resources:
   requests:
     cpu: "750m"

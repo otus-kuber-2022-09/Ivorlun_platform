@@ -3654,7 +3654,7 @@ helm repo add fluent https://fluent.github.io/helm-charts
 helm upgrade --install -f ~/git/github/Ivorlun_platform/kubernetes-logging/fluent-bit.values.yaml --namespace observability --version 0.21.7 fluent-bit fluent/fluent-bit
 ```
 
-
+Важное замечание, что PV не будут автоматически удалятся при удалении неймспейса и, чтобы не вылезать за квоты их нужно будет удалять руками но в Compute Engine > storage > Disks, а не в kubernetes engine
 
 #### Установка EFK стека | Задание со ⭐
 Удалять поля таймштампов, как предложено в лекции, не является решением однозначно.
@@ -3772,7 +3772,7 @@ Warning: ignoring DaemonSet-managed Pods: kube-system/pdcsi-node-5ctgf, observab
 evicting pod observability/elasticsearch-master-0
 error when evicting pods/"elasticsearch-master-0" -n "observability" (will retry after 5s): Cannot evict pod as it would violate the pod's disruption budget.
 ```
-
+New dashboard
 После удаления пода вручную метрики Prometheus перестали собираться, так как у сервиса, к которому
 подключается exporter, пропали все endpoint.
 Сделаем вывод - узнавать о проблемах с ElasticSearch в нашем сценарии (replication factor = 1: 1 shard + 1 replica на индекс) желательно на этапе выхода из строя первой ноды в кластере.
@@ -3810,6 +3810,29 @@ error when evicting pods/"elasticsearch-master-0" -n "observability" (will retry
 helm repo add grafana https://grafana.github.io/helm-charts && helm repo update
 helm upgrade --install loki-stack --namespace=observability grafana/loki-stack -f ~/git/github/Ivorlun_platform/kubernetes-logging/loki-stack.values.yaml
 ```
+В то время как в прометеус оператор вэльюс добавляем:
+```yaml
+  additionalDataSources:
+  - name: loki-stack
+    isDefault: false
+    type: loki
+    url: http://loki-stack:3100
+```
+
+Важно в datasource поставить `isDefault: false` для графаны, иначе источник данных локи будет считаться дефолтным - прометеус будет перезаписан и исчезнет.
+
+Так как для ingress-nginx включён service monitor, то достаточно залить официальный дашборд для ингресса https://github.com/kubernetes/ingress-nginx/blob/main/deploy/grafana/dashboards/nginx.json, который подтягивает из источника-прометея данные в графану.
+
+#### Переменные в дашбордах графаны
+В дашбордах графаны можно создавать собственные переменные, вынимая их мз метрик или логов.
+
+В сохранённых конфигах официальных дашбордов в виде json-ок, можно для себя почерпнуть много полезных переменных и на их основе собрать свой дашборд.
+
+Причём переменными могут быть не только данные, но и сами источники, временные отрезки и тп.
+
+
+
+
 
 ### Замечания к ДЗ
 

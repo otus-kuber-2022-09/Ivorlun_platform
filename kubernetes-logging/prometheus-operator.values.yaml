@@ -1,24 +1,16 @@
+# https://github.com/prometheus-community/helm-charts/blob/kube-prometheus-stack-44.3.0/charts/kube-prometheus-stack/values.yaml
 grafana:
   ingress:
     enabled: true
     ingressClassName: nginx
     path: /
     hosts:
-      - grafana.34.90.233.120.nip.io
+      - grafana.35.204.72.21.nip.io
   defaultDashboardsTimezone: Europe/Moscow
 
 # https://github.com/grafana/helm-charts/tree/loki-stack-2.8.9/charts/loki-stack#deploy-grafana-to-your-cluster
   additionalDataSources:
   - name: loki-stack
-    access: proxy
-    basicAuth: False
-    # basicAuthPassword: ${LOKI_PASSWORD}
-    # basicAuthUser: admin
+    isDefault: false
     type: loki
     url: http://loki-stack:3100
-  # env:
-  # - name: LOKI_PASSWORD
-  #   valueFrom:
-  #     secretKeyRef:
-  #       key: admin-password
-  #       name: loki-grafana
