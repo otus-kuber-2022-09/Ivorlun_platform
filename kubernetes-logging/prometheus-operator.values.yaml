@@ -1,0 +1,16 @@
+# https://github.com/prometheus-community/helm-charts/blob/kube-prometheus-stack-44.3.0/charts/kube-prometheus-stack/values.yaml
+grafana:
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    path: /
+    hosts:
+      - grafana.35.204.72.21.nip.io
+  defaultDashboardsTimezone: Europe/Moscow
+
+# https://github.com/grafana/helm-charts/tree/loki-stack-2.8.9/charts/loki-stack#deploy-grafana-to-your-cluster
+  additionalDataSources:
+  - name: loki-stack
+    isDefault: false
+    type: loki
+    url: http://loki-stack:3100

@@ -1,0 +1,12 @@
+ingress:
+  enabled: true
+  path: /
+  hosts:
+    - kibana.35.204.72.21.nip.io
+resources:
+  requests:
+    cpu: "750m"
+    memory: "2Gi"
+  limits:
+    cpu: "750m"
+    memory: "2Gi"
