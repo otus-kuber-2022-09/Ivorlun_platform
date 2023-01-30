@@ -3887,6 +3887,66 @@ config:
 ```
 
 ---
+
+
+# Homework 9 (Operators)
+
+## Kubernetes customization
+Kubernetes is highly configurable and extensible. As a result, there is rarely a need to fork or submit patches to the Kubernetes project code.
+
+Customization approaches can be broadly divided into configuration, which only involves changing flags, local configuration files, or API resources; and extensions, which involve running additional programs or services.
+
+## CR and CRDs
+### Custom resources
+
+* A **resource** is an endpoint in the Kubernetes API that stores a collection of API objects of a certain kind; for example, the built-in pods resource contains a collection of Pod objects.
+* A **custom resource** is an extension of the Kubernetes API that is not necessarily available in a default Kubernetes installation. It represents a customization of a particular Kubernetes installation. However, many core Kubernetes functions are now built using custom resources, making Kubernetes more modular.
+
+On their own, custom resources let you store and retrieve structured data. When you combine a custom resource with a custom controller, custom resources provide a true declarative API.
+### Custom resource definitions
+The CustomResourceDefinition API resource allows you to define custom resources. Defining a CRD object creates a new custom resource with a name and schema that you specify. The Kubernetes API serves and handles the storage of your custom resource. The name of a CRD object must be a valid DNS subdomain name.
+
+This frees you from writing your own API server to handle the custom resource, but the generic nature of the implementation means you have less flexibility than with API server aggregation.
+
+Простыми словами, CRD — это особенная таблица в общей базе данных k8s-кластера, которая содержит записи о различных ресурсах, которыми оперирует оператор в своей работе.
+
+## Control loops and controllers
+
+In robotics and automation, a control loop is a non-terminating loop that regulates the state of a system.
+In Kubernetes, controllers are control loops that watch the state of your cluster, then make or request changes where needed. Each controller tries to move the current cluster state closer to the desired state.
+
+1. Observe - наблюдение за актуальным состоянием кластера
+1. Analyze - определение различий с желаемым состоянием
+1. Act - выполнение набора действий для достижения желаемого состояния
+
+Контроллеры взаимодействуют только с kube-apiserver, который можно воспринимать как message broker, так как он:
+* Получает сообщение от одного контроллера
+* Передает сообщение другим контроллерам или компонентам
+
+Существует 2 способа отслеживания состояния:
+* Edge Trigger - отслеживание (хук) фазового перехода в другое состояние. Было 0, стало 1 - хук отправлен, эвент обработан. Минус - если прервалась сеть в момент смены состояния, то мы потеряем данные об актуальном состоянии объекта.
+* Level Trigger - периодическая проверка состояния без отслеживания переходов. Минус - небольшие задержки и более нагружено. Зато не потеряем данные.
+
+Контроллер не обязательно должен быть запущен внутри кластера:
+Взаимодействовать с kube-apiserver можно из любого места
+Логика контроллера не зависит от способа взаимодействия с kube-apiserver
+
+## Operator
+Operators are software extensions to Kubernetes that make use of custom resources to manage applications and their components. Operators follow Kubernetes principles, notably the control loop.
+Kubernetes' operator pattern concept lets you extend the cluster's behaviour without modifying the code of Kubernetes itself by linking controllers to one or more custom resources. Operators are clients of the Kubernetes API that act as controllers for a Custom Resource.
+
+То есть по факту, опрератор = это объекты + контроллер, который ими управляет.
+
+## Operators vs Helm
+Часто операторы воспринимают как “продвинутые” Helm charts (но это не так).
+Helm - инструмент для:
+* Шаблонизации манифестов
+* Развертывания самописных и публичных charts
+**В задачи Helm не входит контроль того, что уже развернуто**
+
+
+---
+
 ## GitOps
 
 https://habr.com/ru/company/flant/blog/526102/
