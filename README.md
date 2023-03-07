@@ -1461,6 +1461,11 @@ PV являющийся примонтированным локальным хр
 Причём и ключи и допустимые значения этих полей мы задаём сами, естесственно.
 Например: `class:nfs  drive_type:nvme`
 
+Example for Loki persistence:
+* If defined, storageClassName: <storageClass>.
+* If set to "-", sets storageClassName: "", which disables dynamic provisioning in most cases. StorageClass should contain empty name as well?
+* If empty or set to null, no storageClassName spec is set, choosing the default provisioner (gp2 on AWS, standard on GKE, AWS, and OpenStack).
+
 ### Provisioner
 Имя storage plugin-а, который по факту будет выполнять операции с дисками, который привязан к storage class-у.
 
@@ -1722,6 +1727,23 @@ If you want to fetch container images from a private repository, you need a way 
 * Динамического provisioning
 
 У каждого StorageClass есть provisioner, который определяет какой плагин используется для работы с PVs.
+
+PVCs don't necessarily have to request a class. A PVC with its storageClassName set equal to "" is always interpreted to be requesting a PV with no class, so it can only be bound to PVs with no class (no annotation or one set equal to ""). A PVC with no storageClassName is not quite the same and is treated differently by the cluster, depending on whether the DefaultStorageClass admission plugin is turned on.
+
+```
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: foo-pvc
+  namespace: foo
+spec:
+  storageClassName: "" # Empty string must be explicitly set otherwise default StorageClass will be set
+  volumeName: foo-pv
+```
+* If the admission plugin is turned on, the administrator may specify a default StorageClass. All PVCs that have no storageClassName can be bound only to PVs of that default. Specifying a default StorageClass is done by setting the annotation storageclass.kubernetes.io/is-default-class equal to true in a StorageClass object. If the administrator does not specify a default, the cluster responds to PVC creation as if the admission plugin were turned off. If more than one default is specified, the admission plugin forbids the creation of all PVCs.
+* If the admission plugin is turned off, there is no notion of a default StorageClass. All PVCs that have storageClassName set to "" can be bound only to PVs that have storageClassName also set to "". However, PVCs with missing storageClassName can be updated later once default StorageClass becomes available. If the PVC gets updated it will no longer bind to PVs that have storageClassName also set to "".
+
+
 
 ### Provisioner
 Для того, чтобы storage class мог физически управлять выданным ему хранилищем существует Provisioner - т.е. код, который непосредственно отправляет ему вызовы.
@@ -3928,8 +3950,8 @@ In Kubernetes, controllers are control loops that watch the state of your cluste
 * Level Trigger - периодическая проверка состояния без отслеживания переходов. Минус - небольшие задержки и более нагружено. Зато не потеряем данные.
 
 Контроллер не обязательно должен быть запущен внутри кластера:
-Взаимодействовать с kube-apiserver можно из любого места
-Логика контроллера не зависит от способа взаимодействия с kube-apiserver
+* Взаимодействовать с kube-apiserver можно из любого места
+* Логика контроллера не зависит от способа взаимодействия с kube-apiserver
 
 ## Operator
 Operators are software extensions to Kubernetes that make use of custom resources to manage applications and their components. Operators follow Kubernetes principles, notably the control loop.
@@ -3945,6 +3967,31 @@ Helm - инструмент для:
 **В задачи Helm не входит контроль того, что уже развернуто**
 
 
+## Homework part
+Требование к обязательному определению полей в CRD решается дополнением схемы:
+```yaml
+    required:
+    - image
+    - database
+    - password
+    - storage_size
+required:
+- spec
+```
+
+
+
+## HW Problems
+* page 7 wrong API version - `apiVersion: apiextensions.k8s.io/v1beta1` должно быть
+* page 10 валидация должна быть внутри не spec, а versions:
+
+```yaml
+  versions:             # Список версий
+    - name: v1
+      schema:
+        openAPIV3Schema:
+```
+*
 ---
 
 ## GitOps
