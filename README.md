@@ -3966,6 +3966,17 @@ Helm - инструмент для:
 * Развертывания самописных и публичных charts
 **В задачи Helm не входит контроль того, что уже развернуто**
 
+## На примере
+CRD - в простейшем случае это просто набор классических для кубера объектов типа стейтфулсетов, сервисов, хранилища и др., которые просто упакованы в единую конструкцию.
+
+Это очень легко увидеть и понять на примере [оператора MySQL](./kubernetes-operators/).
+По факту есть CR, который говорит с какими значениями ключей создавать обычные для кубера объекты. Как хелм с его values, условно.
+
+Но есть ещё и контроллер - который как обычно обращается в API и такой: ну что там с этим типом CRD - появились CR? А если появились, тогда я буду обращусь к API-сервер и сам методами SDK выполню создание объектов, изменение и тп.
+
+При этом контроллер может быть локально у разработчика запущенный скрипт, который просто использует контекст и kubeconfig для аутентификации.
+
+Дальше декоратор `on_create` будет отслеживать объекты, которые находятся в стадии создания и для них рендерить все нужные ключи в шаблонах обычных ресурсов, подставляя значения из CR.
 
 ## Homework part
 Требование к обязательному определению полей в CRD решается дополнением схемы:
@@ -3982,8 +3993,8 @@ required:
 
 
 ## HW Problems
-* page 7 wrong API version - `apiVersion: apiextensions.k8s.io/v1beta1` должно быть
-* page 10 валидация должна быть внутри не spec, а versions:
+* Страница 7 - wrong API version - `apiVersion: apiextensions.k8s.io/v1beta1` должно быть
+* Страница 10 - валидация должна быть внутри не spec, а versions:
 
 ```yaml
   versions:             # Список версий
@@ -3991,7 +4002,10 @@ required:
       schema:
         openAPIV3Schema:
 ```
-*
+* Страница 33 - PV Already exists, так как создаётся автоматический PV для PVC:
+```json
+[2023-03-11 19:56:18,768] kopf.objects         [WARNING ] [default/mysql-instance] Patching failed with inconsistencies: (('remove', ('status',), {'kopf': {'progress': {'mysql_on_create': {'started': '2023-03-11T16:56:18.700860', 'stopped': None, 'delayed': '2023-03-11T16:57:18.761555', 'purpose': 'create', 'retries': 1, 'success': False, 'failure': False, 'message': '(409)\nReason: Conflict\nHTTP response headers: HTTPHeaderDict({\'Audit-Id\': \'80a3796b-5b8b-46e9-9f0c-e9181d6a2f8f\', \'Cache-Control\': \'no-cache, private\', \'Content-Type\': \'application/json\', \'X-Kubernetes-Pf-Flowschema-Uid\': \'bdf3fe4f-ea4a-4e42-8f1a-58a638a2ffb4\', \'X-Kubernetes-Pf-Prioritylevel-Uid\': \'0d415f28-8e47-424d-bb4a-ec7f0350c352\', \'Date\': \'Sat, 11 Mar 2023 16:56:18 GMT\', \'Content-Length\': \'238\'})\nHTTP response body: {"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"persistentvolumes \\"mysql-instance-pv\\" already exists","reason":"AlreadyExists","details":{"name":"mysql-instance-pv","kind":"persistentvolumes"},"code":409}\n\n', 'subrefs': None}}}}, None),)
+```
 ---
 
 ## GitOps
