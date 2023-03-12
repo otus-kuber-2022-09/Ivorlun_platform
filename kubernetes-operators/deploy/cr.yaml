@@ -8,3 +8,4 @@ spec:
   database: otus-database
   password: otuspassword  # Так делать не нужно, следует использовать secret
   storage_size: 1Gi
+  storage_class: standard

@@ -50,14 +50,17 @@ def mysql_on_create(body, spec, **kwargs):
     password = body['spec']['password']
     database = body['spec']['database']
     storage_size = body['spec']['storage_size']
+    storage_class = body['spec']['storage_class']
 
     # Генерируем JSON манифесты для деплоя
     persistent_volume = render_template('mysql-pv.yml.j2',
                                         {'name': name,
-                                            'storage_size': storage_size})
+                                        'storage_size': storage_size,
+                                        'storage_class': storage_class})
     persistent_volume_claim = render_template('mysql-pvc.yml.j2',
                                                 {'name': name,
-                                                    'storage_size': storage_size})
+                                                'storage_size': storage_size,
+                                                'storage_class': storage_class})
     service = render_template('mysql-service.yml.j2', {'name': name})
 
     deployment = render_template('mysql-deployment.yml.j2', {
@@ -101,7 +104,9 @@ def mysql_on_create(body, spec, **kwargs):
 
     # Cоздаем PVC и PV для бэкапов:
     try:
-        backup_pv = render_template('backup-pv.yml.j2', {'name': name})
+        backup_pv = render_template('backup-pv.yml.j2', {'name': name,
+                                                        'storage_size': storage_size,
+                                                        'storage_class': storage_class})
         api = kubernetes.client.CoreV1Api()
         print(api.create_persistent_volume(backup_pv))
         api.create_persistent_volume(backup_pv)
@@ -109,7 +114,9 @@ def mysql_on_create(body, spec, **kwargs):
         pass
 
     try:
-        backup_pvc = render_template('backup-pvc.yml.j2', {'name': name})
+        backup_pvc = render_template('backup-pvc.yml.j2', {'name': name,
+                                                            'storage_size': storage_size,
+                                                            'storage_class': storage_class})
         api = kubernetes.client.CoreV1Api()
         api.create_namespaced_persistent_volume_claim('default', backup_pvc)
     except kubernetes.client.rest.ApiException:

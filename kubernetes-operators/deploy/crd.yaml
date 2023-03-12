@@ -33,15 +33,18 @@ spec:
                   type: string
                 storage_size:
                   type: string
+                storage_class:
+                  type: string
               required:
               - image
               - database
               - password
               - storage_size
+              - storage_class
           required:
           - spec
-  names:                # различные форматы имени объекта CR
-    kind: MySQL         # kind CR
+  names:
+    kind: MySQL
     plural: mysqls
     singular: mysql
     shortNames:

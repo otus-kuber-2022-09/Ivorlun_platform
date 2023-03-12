@@ -3,6 +3,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: "{{ name }}-pvc"
 spec:
+  storageClassName: {{ storage_class }}
   accessModes:
     - "ReadWriteOnce"
   resources:

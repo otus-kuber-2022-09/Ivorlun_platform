@@ -5,6 +5,7 @@ metadata:
   labels:
     pv-usage: {{ name }}
 spec:
+  storageClassName: {{ storage_class }}
   persistentVolumeReclaimPolicy: Retain
   accessModes:
     - ReadWriteOnce
