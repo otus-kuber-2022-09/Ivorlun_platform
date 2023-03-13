@@ -9,3 +9,5 @@ spec:
   resources:
     requests:
       storage: {{ storage_size }}
+  selector:
+    pv-usage: {{ name }}

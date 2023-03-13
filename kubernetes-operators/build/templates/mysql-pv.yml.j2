@@ -6,10 +6,10 @@ metadata:
     pv-usage: {{ name }}
 spec:
   storageClassName: {{ storage_class }}
-  persistentVolumeReclaimPolicy: Retain
+  persistentVolumeReclaimPolicy: Delete
   accessModes:
     - ReadWriteOnce
   capacity:
     storage: {{ storage_size }}
   hostPath:
-    path: /data/{{ name }}-pv/
+    path: /tmp/{{ name }}-pv/

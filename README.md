@@ -3995,6 +3995,32 @@ required:
 Потому что объект и контроллер - разные сущности имеющие отдельные жизненные циклы.
 Так как у нас уже загружено в кластер описание объекта, CRD, то это является достаточным условием для создания объекта. Примечательно, что мы запускаем наш контроллер с машины разработчика, вне кластера, при этом имеем доступ не через севрис аккаунт, а как полноценный пользователь.
 
+### Исправление проблем с PV и PVC для работы с minikube по умолчанию
+
+Необходимо было добавить storage_class иначе создавались 2 pv, которые ни к чему не привязывались, а для pvc динамический провижининг создавал свои pv с default-ным storage class.
+
+Поэтому crd, шаблоны и код контроллера были изменены и в них были добавлены требования явного указания storage class.
+
+Заменил Reclaim Policy для Mysql PV с Retain на Delete - иначе логика с бэкапом и восстановлением из него не работала: PV с базой, при удалении связанного PVC, переходил в состояние Released и ожидал новой привязки. То есть Backup PV в такой логике был не нужен, так как данные и без него сохранялись.
+Кроме того, PV для базы в статусе Released при пересоздании CR заново приводит к ошибке, если не удалить вручную:
+```
+HTTP response body: {"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"persistentvolumes \"mysql-instance-pv\" already exists","reason":"AlreadyExists","details":{"name":"mysql-instance-pv","kind":"persistentvolumes"},"code":409}
+PV released but not removed
+```
+
+После замены создавались лишний PV для PVC из-за наличия в кластере провижининга, поэтому выставил для PVC селектор по лейблу.
+
+Всё заработало, однако:
+```
+Warning  VolumeFailedDelete        4s    persistentvolume-controller   host_path deleter only supports /tmp/.+ but received provided /data/mysql-instance-pv/
+```
+После чего поменял для данных mysql расположение:
+```yaml
+  hostPath:
+    path: /tmp/{{ name }}-pv/
+```
+После этой настройки можно сказать, что в миникубе 1.29 (k8s 1.26) с настройками по умолчанию, то есть с провижинингом и default storage class-ом, всё работает корректно.
+Однако, стоит отметить, что удаление CR типа Mysql не удаляет backup job-у, а вместе с ней и привязанный к ней pvc.
 
 ## HW Problems
 * Страница 7 - wrong API version - `apiVersion: apiextensions.k8s.io/v1beta1` должно быть
@@ -4010,6 +4036,10 @@ required:
 ```json
 [2023-03-11 19:56:18,768] kopf.objects         [WARNING ] [default/mysql-instance] Patching failed with inconsistencies: (('remove', ('status',), {'kopf': {'progress': {'mysql_on_create': {'started': '2023-03-11T16:56:18.700860', 'stopped': None, 'delayed': '2023-03-11T16:57:18.761555', 'purpose': 'create', 'retries': 1, 'success': False, 'failure': False, 'message': '(409)\nReason: Conflict\nHTTP response headers: HTTPHeaderDict({\'Audit-Id\': \'80a3796b-5b8b-46e9-9f0c-e9181d6a2f8f\', \'Cache-Control\': \'no-cache, private\', \'Content-Type\': \'application/json\', \'X-Kubernetes-Pf-Flowschema-Uid\': \'bdf3fe4f-ea4a-4e42-8f1a-58a638a2ffb4\', \'X-Kubernetes-Pf-Prioritylevel-Uid\': \'0d415f28-8e47-424d-bb4a-ec7f0350c352\', \'Date\': \'Sat, 11 Mar 2023 16:56:18 GMT\', \'Content-Length\': \'238\'})\nHTTP response body: {"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"persistentvolumes \\"mysql-instance-pv\\" already exists","reason":"AlreadyExists","details":{"name":"mysql-instance-pv","kind":"persistentvolumes"},"code":409}\n\n', 'subrefs': None}}}}, None),)
 ```
+*
+* Если Job не выполнилась или выполнилась с ошибкой, то ее нужно удалять в ручную, т к иногда полезно посмотреть логи
+
+
 ---
 
 ## GitOps
