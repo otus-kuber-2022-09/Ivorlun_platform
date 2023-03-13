@@ -92,7 +92,7 @@ def mysql_on_create(body, spec, **kwargs):
 
     # Создаем mysql Deployment:
     api = kubernetes.client.AppsV1Api()
-    api.create_namespaced_deployment('default', deployment)
+    mysql_deployment = api.create_namespaced_deployment('default', deployment)
 
 
     # Пытаемся восстановиться из backup
@@ -122,6 +122,8 @@ def mysql_on_create(body, spec, **kwargs):
     except kubernetes.client.rest.ApiException:
         pass
 
+    return {'mysql-deployment': mysql_deployment.metadata.name}
+
 
 @kopf.on.delete('otus.homework', 'v1', 'mysqls')
 def delete_object_make_backup(body, **kwargs):
@@ -142,3 +144,23 @@ def delete_object_make_backup(body, **kwargs):
     api.create_namespaced_job('default', backup_job)
     wait_until_job_end(f"backup-{name}-job")
     return {'message': "mysql and its children resources deleted"}
+
+
+# @kopf.on.update('otus.homework', 'v1', 'mysqls')
+# def mysql_on_update(spec, status, namespace, logger, **kwargs):
+
+#     size = spec.get('size', None)
+#     if not size:
+#         raise kopf.PermanentError(f"Size must be set. Got {size!r}.")
+
+#     pvc_name = status['create_fn']['pvc-name']
+#     pvc_patch = {'spec': {'resources': {'requests': {'storage': size}}}}
+
+#     api = kubernetes.client.CoreV1Api()
+#     obj = api.patch_namespaced_persistent_volume_claim(
+#         namespace=namespace,
+#         name=pvc_name,
+#         body=pvc_patch,
+#     )
+
+#     logger.info(f"PVC child is updated: {obj}")

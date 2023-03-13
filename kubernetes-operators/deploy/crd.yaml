@@ -3,6 +3,12 @@ kind: CustomResourceDefinition
 metadata:
   name: mysqls.otus.homework # имя CRD должно иметь формат plural.group
 spec:
+  names:
+    kind: MySQL
+    plural: mysqls
+    singular: mysql
+    shortNames:
+      - ms
   scope: Namespaced     # Данный CRD будер работать в рамках namespace
   group: otus.homework  # Группа, отражается в поле apiVersion CR
   versions:             # Список версий
@@ -41,11 +47,8 @@ spec:
               - password
               - storage_size
               - storage_class
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
           required:
           - spec
-  names:
-    kind: MySQL
-    plural: mysqls
-    singular: mysql
-    shortNames:
-      - ms

@@ -4022,6 +4022,16 @@ Warning  VolumeFailedDelete        4s    persistentvolume-controller   host_path
 После этой настройки можно сказать, что в миникубе 1.29 (k8s 1.26) с настройками по умолчанию, то есть с провижинингом и default storage class-ом, всё работает корректно.
 Однако, стоит отметить, что удаление CR типа Mysql не удаляет backup job-у, а вместе с ней и привязанный к ней pvc.
 
+
+```log
+[2023-03-13 18:01:26,785] kopf.objects         [INFO    ] [default/mysql-instance] Creation is processed: 1 succeeded; 0 failed.
+[2023-03-13 18:17:40,104] kopf._core.reactor.o [WARNING ] Non-patchable resources will not be served: {mysqls.v1.otus.homework}
+[2023-03-13 18:17:42,109] kopf._core.reactor.q [WARNING ] Unprocessed streams left for [(mysqls.v1.otus.homework, '879ba89c-851b-48f9-80ca-4a0905d712ef')].
+[2023-03-13 18:17:45,239] kopf.objects         [WARNING ] [default/mysql-instance] Handler 'delete_object_make_backup' is cancelled. Will escalate.
+[2023-03-13 18:18:40,147] kopf._core.reactor.o [WARNING ] Non-patchable resources will not be served: {mysqls.v1.otus.homework}
+```
+
+
 ## HW Problems
 * Страница 7 - wrong API version - `apiVersion: apiextensions.k8s.io/v1beta1` должно быть
 * Страница 10 - валидация должна быть внутри не spec, а versions:
@@ -4036,7 +4046,7 @@ Warning  VolumeFailedDelete        4s    persistentvolume-controller   host_path
 ```json
 [2023-03-11 19:56:18,768] kopf.objects         [WARNING ] [default/mysql-instance] Patching failed with inconsistencies: (('remove', ('status',), {'kopf': {'progress': {'mysql_on_create': {'started': '2023-03-11T16:56:18.700860', 'stopped': None, 'delayed': '2023-03-11T16:57:18.761555', 'purpose': 'create', 'retries': 1, 'success': False, 'failure': False, 'message': '(409)\nReason: Conflict\nHTTP response headers: HTTPHeaderDict({\'Audit-Id\': \'80a3796b-5b8b-46e9-9f0c-e9181d6a2f8f\', \'Cache-Control\': \'no-cache, private\', \'Content-Type\': \'application/json\', \'X-Kubernetes-Pf-Flowschema-Uid\': \'bdf3fe4f-ea4a-4e42-8f1a-58a638a2ffb4\', \'X-Kubernetes-Pf-Prioritylevel-Uid\': \'0d415f28-8e47-424d-bb4a-ec7f0350c352\', \'Date\': \'Sat, 11 Mar 2023 16:56:18 GMT\', \'Content-Length\': \'238\'})\nHTTP response body: {"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"persistentvolumes \\"mysql-instance-pv\\" already exists","reason":"AlreadyExists","details":{"name":"mysql-instance-pv","kind":"persistentvolumes"},"code":409}\n\n', 'subrefs': None}}}}, None),)
 ```
-*
+* См ридми выше - https://github.com/otus-kuber-2022-09/Ivorlun_platform/commit/336bdf907c89c12cf704e4c0a9e33edad132ca0a#diff-f6028578f2d076951bc280f4acb75bcc7d4a36aae67dd577572f79192c65b07a
 * Если Job не выполнилась или выполнилась с ошибкой, то ее нужно удалять в ручную, т к иногда полезно посмотреть логи
 
 
