@@ -1,7 +1,6 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  namespace: {{ namespace }}
   name: backup-{{ name }}-job
   labels:
     usage: backup-{{ name }}-job
