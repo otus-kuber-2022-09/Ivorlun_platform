@@ -4022,14 +4022,44 @@ Warning  VolumeFailedDelete        4s    persistentvolume-controller   host_path
 После этой настройки можно сказать, что в миникубе 1.29 (k8s 1.26) с настройками по умолчанию, то есть с провижинингом и default storage class-ом, всё работает корректно.
 Однако, стоит отметить, что удаление CR типа Mysql не удаляет backup job-у, а вместе с ней и привязанный к ней pvc.
 
+#### Задание со 🌟 (1)
 
-```log
-[2023-03-13 18:01:26,785] kopf.objects         [INFO    ] [default/mysql-instance] Creation is processed: 1 succeeded; 0 failed.
-[2023-03-13 18:17:40,104] kopf._core.reactor.o [WARNING ] Non-patchable resources will not be served: {mysqls.v1.otus.homework}
-[2023-03-13 18:17:42,109] kopf._core.reactor.q [WARNING ] Unprocessed streams left for [(mysqls.v1.otus.homework, '879ba89c-851b-48f9-80ca-4a0905d712ef')].
-[2023-03-13 18:17:45,239] kopf.objects         [WARNING ] [default/mysql-instance] Handler 'delete_object_make_backup' is cancelled. Will escalate.
-[2023-03-13 18:18:40,147] kopf._core.reactor.o [WARNING ] Non-patchable resources will not be served: {mysqls.v1.otus.homework}
+Согласно документации https://kopf.readthedocs.io/en/stable/results/
+
+> All handlers can return arbitrary JSON-serializable values. These values are then put to the resource status under the name of the handler
+
+поэтому просто добавляем
+
+```python
+return {'mysql-deployment': mysql_deployment.metadata.name}
 ```
+
+а для того, чтобы кубер не удалял наши поля как неизвестные, в схему в CRD:
+```yaml
+status:
+  type: object
+  x-kubernetes-preserve-unknown-fields: true
+```
+
+после чего получаем для объекта вывод:
+```json
+❯ k get mysqls.otus.homework mysql-instance -o json | jq '.status'
+{
+  "mysql_on_create": {
+    "mysql-deployment": "mysql-instance"
+  }
+}
+```
+
+#### Задание со 🌟 (2)
+
+Создал апдейт функцию, но получилось так, что backup job берёт не старый пароль, а новый из уже отредактированного объекта CR Mysql. Из-за этого процесс зависает: бэкап не может произвестись из-за того, что по факту запущена база со старым паролем, а джоба с новым: и объект MYSQL не может удалиться.
+
+`mysqldump: Got error: 1045: Access denied for user 'root'@'10.244.0.13' (using password: YES) when trying to connect`
+
+Поменял весь хардкод namespace-а, который был для default на namespace из metadata CR объекта, так как по CRD он namespaced и кубер его автоматически проставляет при создании.
+
+Поменял работу деплоймента и всех джоб с паролем - теперь он берётся из секрета.
 
 
 ## HW Problems

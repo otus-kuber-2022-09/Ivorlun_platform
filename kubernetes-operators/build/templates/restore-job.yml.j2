@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  namespace: default
+  namespace: {{ namespace }}
   name: restore-{{ name }}-job
 spec:
   template:
@@ -13,10 +13,16 @@ spec:
       - name: backup
         image: mysql:5.7
         imagePullPolicy: IfNotPresent
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ name }}-secret
+              key: password
         command:
         - /bin/sh
         - -c
-        - "export BKP=/backup-{{ name }}-pv/{{ name }}-dump.sql; if [ -f $BKP ]; then mysql -u root -h {{ name }} -p{{ password }} {{ database }}< $BKP; else echo $BKP does not exist; fi"
+        - "export BKP=/backup-{{ name }}-pv/{{ name }}-dump.sql; if [ -f $BKP ]; then mysql -u root -h {{ name }} -p$MYSQL_ROOT_PASSWORD {{ database }}< $BKP; else echo $BKP does not exist; fi"
         volumeMounts:
         - name: backup-{{ name }}-pv
           mountPath: /backup-{{ name }}-pv
