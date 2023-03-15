@@ -1,5 +1,6 @@
 #! /usr/bin/env python3
 import base64
+from datetime import datetime
 from jinja2 import Environment, FileSystemLoader
 import kopf
 import kubernetes
@@ -172,8 +173,26 @@ def mysql_on_update(spec, status, namespace, logger, **kwargs):
 
     logger.info(f"Object is updated: {mysql_secret}")
 
-    # mysql_deployment_name = status['mysql_on_create']['mysql_deployment']
-    # logger.info(f"Going to restart deployment: {mysql_on_create}")
-    # Интересно, если секрет поменяется, то перезапустится ли деплоймент сам?
+    mysql_deployment_name = status['mysql_on_create']['mysql_deployment']
+    logger.info(f"Going to restart deployment: {mysql_on_create}")
+
+    now = str(datetime.utcnow().isoformat("T") + "Z")
+    body = {
+        'spec': {
+            'template':{
+                'metadata': {
+                    'annotations': {
+                        'kubectl.kubernetes.io/restartedAt': now
+                    }
+                }
+            }
+        }
+    }
+    api = kubernetes.client.AppsV1Api()
+    try:
+        api.patch_namespaced_deployment(mysql_deployment_name, namespace, body, pretty='true')
+    except kubernetes.client.rest.ApiException as ex:
+        print("Exception when calling AppsV1Api->read_namespaced_deployment_status: %s\n" % ex)
+
 
     return {'Object secret has been updated': mysql_secret.metadata.name}
