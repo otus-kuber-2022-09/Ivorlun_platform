@@ -45,17 +45,18 @@ def delete_success_jobs(mysql_instance_name, namespace):
 
 @kopf.on.create('otus.homework', 'v1', 'mysqls')
 # Функция, которая будет запускаться при создании объектов тип MySQL:
-def mysql_on_create(body, namespace, spec, **kwargs):
+def mysql_on_create(body, namespace, logger, **kwargs):
     name = body['metadata']['name']
     image = body['spec']['image']
-    password = base64.b64encode(b"{body['spec']['password']}").decode("ascii")
+    password = base64.b64encode(bytes(body['spec']['password'], "ascii")).decode("ascii")
     database = body['spec']['database']
     storage_size = body['spec']['storage_size']
     storage_class = body['spec']['storage_class']
     namespace = namespace
 
+    logger.info(f"Creating CRD called {name} within {namespace} namespace")
     # Генерируем JSON манифесты для деплоя
-    secret = render_template('mysql-pass.yml.j2',
+    secret = render_template('mysql-secret.yml.j2',
                                         {'name': name,
                                         'password': password})
     persistent_volume = render_template('mysql-pv.yml.j2',
@@ -87,7 +88,7 @@ def mysql_on_create(body, namespace, spec, **kwargs):
     # ^ Таким образом при удалении CR удалятся все, связанные с ним pv,pvc,svc, deployments
 
     api = kubernetes.client.CoreV1Api()
-    mysql_pass = api.create_namespaced_secret(namespace, secret)
+    mysql_secret = api.create_namespaced_secret(namespace, secret)
     # Создаем mysql PV:
     api.create_persistent_volume(persistent_volume)
     # Создаем mysql PVC:
@@ -128,7 +129,7 @@ def mysql_on_create(body, namespace, spec, **kwargs):
         pass
 
     return {'mysql_deployment': mysql_deployment.metadata.name,
-            'mysql_pass': mysql_pass.metadata.name}
+            'mysql_secret': mysql_secret.metadata.name}
 
 
 @kopf.on.delete('otus.homework', 'v1', 'mysqls')
@@ -155,11 +156,11 @@ def delete_object_make_backup(body, namespace, logger, **kwargs):
 @kopf.on.update('otus.homework', 'v1', 'mysqls')
 def mysql_on_update(spec, status, namespace, logger, **kwargs):
 
-    password = base64.b64encode(spec.get('password', None)).decode("ascii")
+    password = base64.b64encode(bytes(spec.get('password', None), "ascii")).decode("ascii")
     if not password:
         raise kopf.PermanentError(f"password must be set. Got {password!r}.")
 
-    secret_name = status['mysql_on_create']['mysql_pass']
+    secret_name = status['mysql_on_create']['mysql_secret']
     secret_patch = {'data': {'password': password}}
 
     api = kubernetes.client.CoreV1Api()
