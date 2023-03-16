@@ -89,13 +89,14 @@ def mysql_on_create(body, namespace, logger, **kwargs):
     # ^ Таким образом при удалении CR удалятся все, связанные с ним pv,pvc,svc, deployments
 
     api = kubernetes.client.CoreV1Api()
+    # Создаем mysql SVC:
+    mysql_svc = api.create_namespaced_service(namespace, service)
+    # Создаем mysql Secret:
     mysql_secret = api.create_namespaced_secret(namespace, secret)
     # Создаем mysql PV:
-    api.create_persistent_volume(persistent_volume)
+    mysql_pv = api.create_persistent_volume(persistent_volume)
     # Создаем mysql PVC:
-    api.create_namespaced_persistent_volume_claim(namespace, persistent_volume_claim)
-    # Создаем mysql SVC:
-    api.create_namespaced_service(namespace, service)
+    mysql_pvc = api.create_namespaced_persistent_volume_claim(namespace, persistent_volume_claim)
 
     # Создаем mysql Deployment:
     api = kubernetes.client.AppsV1Api()
@@ -105,7 +106,7 @@ def mysql_on_create(body, namespace, logger, **kwargs):
     # Пытаемся восстановиться из backup
     try:
         api = kubernetes.client.BatchV1Api()
-        api.create_namespaced_job(namespace, restore_job)
+        mysql_restore_job = api.create_namespaced_job(namespace, restore_job)
     except kubernetes.client.rest.ApiException:
         pass
 
@@ -115,7 +116,6 @@ def mysql_on_create(body, namespace, logger, **kwargs):
                                                         'storage_size': storage_size,
                                                         'storage_class': storage_class})
         api = kubernetes.client.CoreV1Api()
-        print(api.create_persistent_volume(backup_pv))
         api.create_persistent_volume(backup_pv)
     except kubernetes.client.rest.ApiException:
         pass
@@ -130,69 +130,112 @@ def mysql_on_create(body, namespace, logger, **kwargs):
         pass
 
     return {'mysql_deployment': mysql_deployment.metadata.name,
-            'mysql_secret': mysql_secret.metadata.name}
+            'mysql_secret': mysql_secret.metadata.name,
+            'mysql_pv': mysql_pv.metadata.name,
+            'mysql_pvc': mysql_pvc.metadata.name,
+            'mysql_svc': mysql_svc.metadata.name,
+            'mysql_restore_job': mysql_restore_job.metadata.name
+            }
 
 
 @kopf.on.delete('otus.homework', 'v1', 'mysqls')
-def delete_object_make_backup(body, namespace, logger, **kwargs):
+def delete_object_make_backup(body, status, namespace, logger, **kwargs):
     namespace = namespace
     name = body['metadata']['name']
     image = body['spec']['image']
     database = body['spec']['database']
 
+    cr_deployment_name = status['mysql_on_create']['mysql_deployment']
+
     delete_success_jobs(name, namespace)
     logger.info(f"Creating bkp job for: {name}")
 
     # Cоздаем backup job:
-    api = kubernetes.client.BatchV1Api()
     backup_job = render_template('backup-job.yml.j2', {
         'name': name,
         'image': image,
         'database': database})
-    api.create_namespaced_job(namespace, backup_job)
-    wait_until_job_end(f"backup-{name}-job", namespace)
-    return {'message': "mysql and its children resources deleted"}
+
+    try:
+        api = kubernetes.client.AppsV1Api()
+        api.read_namespaced_deployment(cr_deployment_name, namespace)
+        try:
+            api = kubernetes.client.BatchV1Api()
+            api.create_namespaced_job(namespace, backup_job)
+            wait_until_job_end(f"backup-{name}-job", namespace)
+            return {'message': "Backup finished. Mysql and its children resources deleted"}
+        except kubernetes.client.rest.ApiException as e:
+            print("Exception when calling AppsV1Api->read_namespaced_deployment: %s\n" % e)
+    except kubernetes.client.rest.ApiException as e:
+        print("Exception when calling AppsV1Api->read_namespaced_deployment: %s\n" % e)
+        logger.info(f"No backup because no CR Deployment with name: {cr_deployment_name}")
+        pass
+    return {'message': "No backup was accomplished"}
 
 
 @kopf.on.update('otus.homework', 'v1', 'mysqls')
-def mysql_on_update(spec, status, namespace, logger, **kwargs):
+def mysql_on_update(name, body, status, namespace, logger, **kwargs):
 
-    password = base64.b64encode(bytes(spec.get('password', None), "ascii")).decode("ascii")
-    if not password:
-        raise kopf.PermanentError(f"password must be set. Got {password!r}.")
+    logger.info(f"HERE STARTS mysql_on_update and delete_object_make_backup upcoming")
 
-    secret_name = status['mysql_on_create']['mysql_secret']
-    secret_patch = {'data': {'password': password}}
+    delete_object_make_backup(body, status, namespace, logger, **kwargs)
+    logger.info(f"delete_object_make_backup finished")
+    logger.info(f"obtaing resources names from status")
+
+    cr_deployment_name = status['mysql_on_create']['mysql_deployment']
+    cr_secret_name = status['mysql_on_create']['mysql_secret']
+    cr_pv_name = status['mysql_on_create']['mysql_pv']
+    cr_pvc_name = status['mysql_on_create']['mysql_pvc']
+    cr_svc_name = status['mysql_on_create']['mysql_svc']
+    cr_restore_job_name = status['mysql_on_create']['mysql_restore_job']
+
+    logger.info(f"Going to delete every resource")
+
+    try:
+        api = kubernetes.client.AppsV1Api()
+        api_response = api.delete_namespaced_deployment(cr_deployment_name, namespace)
+    except kubernetes.client.rest.ApiException as e:
+        print("Exception when calling AppsV1Api->delete_namespaced_deployment: %s\n" % e)
+
+    try:
+        api = kubernetes.client.BatchV1Api()
+        api_response = api.delete_namespaced_job(cr_restore_job_name, namespace)
+    except kubernetes.client.rest.ApiException as e:
+        print("Exception when calling CoreV1Api->delete_namespaced_job: %s\n" % e)
 
     api = kubernetes.client.CoreV1Api()
-    mysql_secret = api.patch_namespaced_secret(
-        namespace=namespace,
-        name=secret_name,
-        body=secret_patch,
-    )
-
-    logger.info(f"Object is updated: {mysql_secret}")
-
-    mysql_deployment_name = status['mysql_on_create']['mysql_deployment']
-    logger.info(f"Going to restart deployment: {mysql_on_create}")
-
-    now = str(datetime.utcnow().isoformat("T") + "Z")
-    body = {
-        'spec': {
-            'template':{
-                'metadata': {
-                    'annotations': {
-                        'kubectl.kubernetes.io/restartedAt': now
-                    }
-                }
-            }
-        }
-    }
-    api = kubernetes.client.AppsV1Api()
     try:
-        api.patch_namespaced_deployment(mysql_deployment_name, namespace, body, pretty='true')
-    except kubernetes.client.rest.ApiException as ex:
-        print("Exception when calling AppsV1Api->read_namespaced_deployment_status: %s\n" % ex)
+        api_response = api.delete_namespaced_secret(cr_secret_name, namespace)
+    except kubernetes.client.rest.ApiException as e:
+        print("Exception when calling CoreV1Api->delete_namespaced_secret: %s\n" % e)
+
+    try:
+        api_response = api.delete_namespaced_persistent_volume_claim(cr_pvc_name, namespace)
+    except kubernetes.client.rest.ApiException as e:
+        print("Exception when calling CoreV1Api->delete_namespaced_persistent_volume_claim: %s\n" % e)
+
+    try:
+        api_response = api.delete_namespaced_service(cr_svc_name, namespace)
+    except kubernetes.client.rest.ApiException as e:
+        print("Exception when calling CoreV1Api->delete_namespaced_service: %s\n" % e)
+
+    try:
+        api_response = api.delete_persistent_volume(cr_pv_name)
+        print(api_response)
+    except kubernetes.client.rest.ApiException as e:
+        print("Exception when calling CoreV1Api->delete_persistent_volume: %s\n" % e)
+
+    logger.info(f"Checking persistent volume is removed")
+    try:
+        api_response = api.read_persistent_volume(cr_pv_name)
+        print(api_response)
+        time.sleep(20)
+    except kubernetes.client.rest.ApiException as e:
+        print("Exception when calling CoreV1Api->read_persistent_volume: %s\n" % e)
+        pass
 
 
-    return {'Object secret has been updated': mysql_secret.metadata.name}
+    logger.info(f"Going to recreate all resources via mysql_on_create")
+
+    mysql_on_create(body, namespace, logger, **kwargs)
+    logger.info(f"Object is updated: {name}")
