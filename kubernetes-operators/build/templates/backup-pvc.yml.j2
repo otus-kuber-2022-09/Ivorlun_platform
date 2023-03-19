@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: "backup-{{ name }}-pvc"
+spec:
+  storageClassName: {{ storage_class }}
+  accessModes:
+    - "ReadWriteOnce"
+  resources:
+    requests:
+      storage: {{ storage_size }}
+  selector:
+    pv-usage: "backup-{{ name }}"

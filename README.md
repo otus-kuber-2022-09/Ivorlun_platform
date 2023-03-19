@@ -1461,6 +1461,11 @@ PV являющийся примонтированным локальным хр
 Причём и ключи и допустимые значения этих полей мы задаём сами, естесственно.
 Например: `class:nfs  drive_type:nvme`
 
+Example for Loki persistence:
+* If defined, storageClassName: <storageClass>.
+* If set to "-", sets storageClassName: "", which disables dynamic provisioning in most cases. StorageClass should contain empty name as well?
+* If empty or set to null, no storageClassName spec is set, choosing the default provisioner (gp2 on AWS, standard on GKE, AWS, and OpenStack).
+
 ### Provisioner
 Имя storage plugin-а, который по факту будет выполнять операции с дисками, который привязан к storage class-у.
 
@@ -1722,6 +1727,23 @@ If you want to fetch container images from a private repository, you need a way 
 * Динамического provisioning
 
 У каждого StorageClass есть provisioner, который определяет какой плагин используется для работы с PVs.
+
+PVCs don't necessarily have to request a class. A PVC with its storageClassName set equal to "" is always interpreted to be requesting a PV with no class, so it can only be bound to PVs with no class (no annotation or one set equal to ""). A PVC with no storageClassName is not quite the same and is treated differently by the cluster, depending on whether the DefaultStorageClass admission plugin is turned on.
+
+```
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: foo-pvc
+  namespace: foo
+spec:
+  storageClassName: "" # Empty string must be explicitly set otherwise default StorageClass will be set
+  volumeName: foo-pv
+```
+* If the admission plugin is turned on, the administrator may specify a default StorageClass. All PVCs that have no storageClassName can be bound only to PVs of that default. Specifying a default StorageClass is done by setting the annotation storageclass.kubernetes.io/is-default-class equal to true in a StorageClass object. If the administrator does not specify a default, the cluster responds to PVC creation as if the admission plugin were turned off. If more than one default is specified, the admission plugin forbids the creation of all PVCs.
+* If the admission plugin is turned off, there is no notion of a default StorageClass. All PVCs that have storageClassName set to "" can be bound only to PVs that have storageClassName also set to "". However, PVCs with missing storageClassName can be updated later once default StorageClass becomes available. If the PVC gets updated it will no longer bind to PVs that have storageClassName also set to "".
+
+
 
 ### Provisioner
 Для того, чтобы storage class мог физически управлять выданным ему хранилищем существует Provisioner - т.е. код, который непосредственно отправляет ему вызовы.
@@ -3887,6 +3909,202 @@ config:
 ```
 
 ---
+
+
+# Homework 9 (Operators)
+
+## Kubernetes customization
+Kubernetes is highly configurable and extensible. As a result, there is rarely a need to fork or submit patches to the Kubernetes project code.
+
+Customization approaches can be broadly divided into configuration, which only involves changing flags, local configuration files, or API resources; and extensions, which involve running additional programs or services.
+
+## CR and CRDs
+### Custom resources
+
+* A **resource** is an endpoint in the Kubernetes API that stores a collection of API objects of a certain kind; for example, the built-in pods resource contains a collection of Pod objects.
+* A **custom resource** is an extension of the Kubernetes API that is not necessarily available in a default Kubernetes installation. It represents a customization of a particular Kubernetes installation. However, many core Kubernetes functions are now built using custom resources, making Kubernetes more modular.
+
+On their own, custom resources let you store and retrieve structured data. When you combine a custom resource with a custom controller, custom resources provide a true declarative API.
+### Custom resource definitions
+The CustomResourceDefinition API resource allows you to define custom resources. Defining a CRD object creates a new custom resource with a name and schema that you specify. The Kubernetes API serves and handles the storage of your custom resource. The name of a CRD object must be a valid DNS subdomain name.
+
+This frees you from writing your own API server to handle the custom resource, but the generic nature of the implementation means you have less flexibility than with API server aggregation.
+
+Простыми словами, CRD — это особенная таблица в общей базе данных k8s-кластера, которая содержит записи о различных ресурсах, которыми оперирует оператор в своей работе.
+
+## Control loops and controllers
+
+In robotics and automation, a control loop is a non-terminating loop that regulates the state of a system.
+In Kubernetes, controllers are control loops that watch the state of your cluster, then make or request changes where needed. Each controller tries to move the current cluster state closer to the desired state.
+
+1. Observe - наблюдение за актуальным состоянием кластера
+1. Analyze - определение различий с желаемым состоянием
+1. Act - выполнение набора действий для достижения желаемого состояния
+
+Контроллеры взаимодействуют только с kube-apiserver, который можно воспринимать как message broker, так как он:
+* Получает сообщение от одного контроллера
+* Передает сообщение другим контроллерам или компонентам
+
+Существует 2 способа отслеживания состояния:
+* Edge Trigger - отслеживание (хук) фазового перехода в другое состояние. Было 0, стало 1 - хук отправлен, эвент обработан. Минус - если прервалась сеть в момент смены состояния, то мы потеряем данные об актуальном состоянии объекта.
+* Level Trigger - периодическая проверка состояния без отслеживания переходов. Минус - небольшие задержки и более нагружено. Зато не потеряем данные.
+
+Контроллер не обязательно должен быть запущен внутри кластера:
+* Взаимодействовать с kube-apiserver можно из любого места
+* Логика контроллера не зависит от способа взаимодействия с kube-apiserver
+
+## Operator
+Operators are software extensions to Kubernetes that make use of custom resources to manage applications and their components. Operators follow Kubernetes principles, notably the control loop.
+Kubernetes' operator pattern concept lets you extend the cluster's behaviour without modifying the code of Kubernetes itself by linking controllers to one or more custom resources. Operators are clients of the Kubernetes API that act as controllers for a Custom Resource.
+
+То есть по факту, опрератор = это объекты + контроллер, который ими управляет.
+
+## Operators vs Helm
+Часто операторы воспринимают как “продвинутые” Helm charts (но это не так).
+Helm - инструмент для:
+* Шаблонизации манифестов
+* Развертывания самописных и публичных charts
+**В задачи Helm не входит контроль того, что уже развернуто**
+
+## На примере
+CRD - в простейшем случае это просто набор классических для кубера объектов типа стейтфулсетов, сервисов, хранилища и др., которые просто упакованы в единую конструкцию.
+
+Это очень легко увидеть и понять на примере [оператора MySQL](./kubernetes-operators/).
+По факту есть CR, который говорит с какими значениями ключей создавать обычные для кубера объекты. Как хелм с его values, условно.
+
+Но есть ещё и контроллер - который как обычно обращается в API и такой: ну что там с этим типом CRD - появились CR? А если появились, тогда я буду обращусь к API-сервер и сам методами SDK выполню создание объектов, изменение и тп.
+
+При этом контроллер может быть локально у разработчика запущенный скрипт, который просто использует контекст и kubeconfig для аутентификации.
+
+Дальше декоратор `on_create` будет отслеживать объекты, которые находятся в стадии создания и для них рендерить все нужные ключи в шаблонах обычных ресурсов, подставляя значения из CR.
+
+## Homework part
+Требование к обязательному определению полей в CRD решается дополнением схемы:
+```yaml
+    required:
+    - image
+    - database
+    - password
+    - storage_size
+required:
+- spec
+```
+
+### Вопрос: почему объект создался, хотя мы создали CR, до того, как запустили контроллер?
+
+Потому что объект и контроллер - разные сущности имеющие отдельные жизненные циклы.
+Так как у нас уже загружено в кластер описание объекта, CRD, то это является достаточным условием для создания объекта. Примечательно, что мы запускаем наш контроллер с машины разработчика, вне кластера, при этом имеем доступ не через севрис аккаунт, а как полноценный пользователь.
+
+### Исправление проблем с PV и PVC для работы с minikube по умолчанию
+
+Необходимо было добавить storage_class иначе создавались 2 pv, которые ни к чему не привязывались, а для pvc динамический провижининг создавал свои pv с default-ным storage class.
+
+Поэтому crd, шаблоны и код контроллера были изменены и в них были добавлены требования явного указания storage class.
+
+Заменил Reclaim Policy для Mysql PV с Retain на Delete - иначе логика с бэкапом и восстановлением из него не работала: PV с базой, при удалении связанного PVC, переходил в состояние Released и ожидал новой привязки. То есть Backup PV в такой логике был не нужен, так как данные и без него сохранялись.
+Кроме того, PV для базы в статусе Released при пересоздании CR заново приводит к ошибке, если не удалить вручную:
+```
+HTTP response body: {"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"persistentvolumes \"mysql-instance-pv\" already exists","reason":"AlreadyExists","details":{"name":"mysql-instance-pv","kind":"persistentvolumes"},"code":409}
+PV released but not removed
+```
+
+После замены создавались лишний PV для PVC из-за наличия в кластере провижининга, поэтому выставил для PVC селектор по лейблу.
+
+Всё заработало, однако:
+```
+Warning  VolumeFailedDelete        4s    persistentvolume-controller   host_path deleter only supports /tmp/.+ but received provided /data/mysql-instance-pv/
+```
+После чего поменял для данных mysql расположение:
+```yaml
+  hostPath:
+    path: /tmp/{{ name }}-pv/
+```
+После этой настройки можно сказать, что в миникубе 1.29 (k8s 1.26) с настройками по умолчанию, то есть с провижинингом и default storage class-ом, всё работает корректно.
+Однако, стоит отметить, что удаление CR типа Mysql не удаляет backup job-у, а вместе с ней и привязанный к ней pvc.
+
+#### Задание со 🌟 (1) Status
+
+Согласно документации https://kopf.readthedocs.io/en/stable/results/
+
+> All handlers can return arbitrary JSON-serializable values. These values are then put to the resource status under the name of the handler
+
+поэтому просто добавляем
+
+```python
+return {'mysql-deployment': mysql_deployment.metadata.name}
+```
+
+а для того, чтобы кубер не удалял наши поля как неизвестные, в схему в CRD:
+```yaml
+status:
+  type: object
+  x-kubernetes-preserve-unknown-fields: true
+```
+
+после чего получаем для объекта вывод:
+```json
+❯ k get mysqls.otus.homework mysql-instance -o json | jq '.status'
+{
+  "mysql_on_create": {
+    "mysql-deployment": "mysql-instance"
+  }
+}
+```
+
+#### Задание со 🌟 (2) CR Update
+
+Создал апдейт функцию в декораторе `on.update`, но получилось так, что backup job берёт не старый пароль, а новый из уже отредактированного объекта CR Mysql. Из-за этого процесс зависает: бэкап не может произвестись из-за того, что по факту запущена база со старым паролем, а джоба с новым: и объект MYSQL не может удалиться.
+
+`mysqldump: Got error: 1045: Access denied for user 'root'@'10.244.0.13' (using password: YES) when trying to connect`
+
+Поменял весь хардкод namespace-а, который был для default на namespace из metadata CR объекта, так как по CRD он namespaced и кубер его автоматически проставляет при создании.
+
+Поменял работу деплоймента и всех джоб с паролем - теперь он берётся из секрета.
+
+Важно, что для джобов нельзя использовать `MYSQL_ROOT_PASSWORD`, так как это служебная переменная и в таком случае запускается процесс работы образа как сервера.
+
+Всё заработало, однако, я обнаружил, что несмотря на то, что при изменении в CR  секрет, а вместе с ним, переменные MYSQL_PASS везде менялись, в том числе и для деплоймента, который был настроен на пересоздание, так как оставался связанный PV, внутри которого была база с паролем. Поэтому  он не изменялся на самом деле.
+
+```yaml
+volumeMounts:
+- name: {{ name }}-pv
+  mountPath: /var/lib/mysql
+```
+По этой причине было решено пересоздавать Deployment, а также PVC так как он создаётся по нашей логике отдельно и его жизненный цикл отвязан от деплоймента.
+
+В общем проблема остаётся, так как даже при удалении всех ресурсов, которые работают под капотом CR, включая PV, данные остаются на диске, так как это константный hostpath и смена пароля возжможна только при уникальном имени либо же при прямом апдейте пароля постхуками.
+
+## HW Problems
+* Страница 7 - wrong API version - `apiVersion: apiextensions.k8s.io/v1beta1` должно быть
+* Страница 10 - валидация должна быть внутри не spec, а versions:
+
+```yaml
+  versions:             # Список версий
+    - name: v1
+      schema:
+        openAPIV3Schema:
+```
+* Страница 33 - PV Already exists, так как создаётся автоматический PV для PVC:
+```json
+[2023-03-11 19:56:18,768] kopf.objects         [WARNING ] [default/mysql-instance] Patching failed with inconsistencies: (('remove', ('status',), {'kopf': {'progress': {'mysql_on_create': {'started': '2023-03-11T16:56:18.700860', 'stopped': None, 'delayed': '2023-03-11T16:57:18.761555', 'purpose': 'create', 'retries': 1, 'success': False, 'failure': False, 'message': '(409)\nReason: Conflict\nHTTP response headers: HTTPHeaderDict({\'Audit-Id\': \'80a3796b-5b8b-46e9-9f0c-e9181d6a2f8f\', \'Cache-Control\': \'no-cache, private\', \'Content-Type\': \'application/json\', \'X-Kubernetes-Pf-Flowschema-Uid\': \'bdf3fe4f-ea4a-4e42-8f1a-58a638a2ffb4\', \'X-Kubernetes-Pf-Prioritylevel-Uid\': \'0d415f28-8e47-424d-bb4a-ec7f0350c352\', \'Date\': \'Sat, 11 Mar 2023 16:56:18 GMT\', \'Content-Length\': \'238\'})\nHTTP response body: {"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"persistentvolumes \\"mysql-instance-pv\\" already exists","reason":"AlreadyExists","details":{"name":"mysql-instance-pv","kind":"persistentvolumes"},"code":409}\n\n', 'subrefs': None}}}}, None),)
+```
+* См ридми выше - https://github.com/otus-kuber-2022-09/Ivorlun_platform/commit/336bdf907c89c12cf704e4c0a9e33edad132ca0a#diff-f6028578f2d076951bc280f4acb75bcc7d4a36aae67dd577572f79192c65b07a
+* Если Job не выполнилась или выполнилась с ошибкой, то ее нужно удалять в ручную, т к иногда полезно посмотреть логи
+* Запуск тестовой джобы приводит к тому, что "2" и "2" не совпадают, так как в случае запроса к базе двойка идёт с переводом строки.
+```bash
+export MYSQLPOD="$(kubectl get pods -l app=mysql-instance -o jsonpath="{.items[*].metadata.name}")"
+content="$(kubectl exec -it $MYSQLPOD -- bash -c 'MYSQL_PWD=otuspassword  mysql -ss -e "select count(*) from test where name LIKE \"some data%\";" otus-database')"
+
+if [[ "$content" == "2" ]]
+then
+    exit 0
+else
+    exit 1
+fi
+```
+
+---
+
 ## GitOps
 
 https://habr.com/ru/company/flant/blog/526102/

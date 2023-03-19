@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: restore-{{ name }}-job
+spec:
+  template:
+    metadata:
+      name: restore-{{ name }}-job
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: backup
+        image: mysql:5.7
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: DB_PASS
+          valueFrom:
+            secretKeyRef:
+              name: {{ name }}-secret
+              key: password
+        command:
+        - /bin/sh
+        - -c
+        - "export BKP=/backup-{{ name }}-pv/{{ name }}-dump.sql; if [ -f $BKP ]; then mysql -u root -h {{ name }} -p$DB_PASS {{ database }} < $BKP; else echo $BKP does not exist; fi"
+        volumeMounts:
+        - name: backup-{{ name }}-pv
+          mountPath: /backup-{{ name }}-pv
+      volumes:
+      - name: backup-{{ name }}-pv
+        persistentVolumeClaim:
+          claimName: backup-{{ name }}-pvc
