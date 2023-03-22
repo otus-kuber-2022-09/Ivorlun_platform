@@ -4105,11 +4105,68 @@ fi
 
 ---
 
-## GitOps
+## Homework 10 (GitOps)
 
 https://habr.com/ru/company/flant/blog/526102/
 
 https://cloud.yandex.ru/training/training-pro
+
+### Homework part
+
+GitLab репозиторий, в котором находится исходный код проекта `Online Boutique`, а также CI для сборки образов:
+https://gitlab.com/Ivorlun/microservices-demo
+
+
+Helm чарты для микросервисов были честно разделены и воссозданы из существующего единого шаблона, а не взяты из предложенного в ДЗ репозитория.
+В связи с чем все чарты сохранили возможность полной параметризации через values.
+https://gitlab.com/Ivorlun/microservices-demo/-/tree/main/deploy/charts
+
+```bash
+❯ tree -L 1 deploy/charts/
+deploy/charts/
+├── adservice
+├── cartservice
+├── checkoutservice
+├── currencyservice
+├── emailservice
+├── frontend
+├── loadgenerator
+├── paymentservice
+├── productcatalogservice
+├── recommendationservice
+└── shippingservice
+```
+
+#### Подготовка Kubernetes кластера | Задание со ⭐
+
+> Самостоятельно реализуйте установку istio как GKE аддона ([ссылка на документацию](https://cloud.google.com/istio/docs/istio-on-gke/installing)) 
+
+Данный подход устарел несколько лет назад, сейчас в GKE используется Anthos Service Mesh, сама формулировка неверная.
+
+
+
+#### Continuous Integration | Задание со ⭐
+
+В связи с тем, что внутри проекта уже есть баш-скрипт, который занимается сборкой образов, к тому же параметризован, проще всего использовать именно его для включение в CI `hack/make-docker-images.sh`.
+
+В таком случае наш CI выглядит просто как 
+
+```yaml
+  services:
+    - docker:20.10.16-dind
+  before_script:
+    - apk add --no-cache bash
+    - mkdir $HOME/.docker && echo ${DOCKER_CONFIG_BASE64} | base64 -d > $HOME/.docker/config.json
+    - docker info
+  script:
+    - export CUSTOM_REF_NAME_SLUG=${CI_COMMIT_REF_NAME//[^0-9a-zA-Z._]/-}
+    - export REPO_PREFIX=ivorlun && export TAG=${CUSTOM_REF_NAME_SLUG}
+    - ./hack/make-docker-images.sh
+```
+
+Вместо предложенного в ДЗ `CUSTOM_REF_NAME_SLUG=${CI_COMMIT_REF_NAME//[^0-9a-zA-Z._]/-}`, используется `CUSTOM_REF_NAME_SLUG=${CI_COMMIT_REF_NAME//[^0-9a-zA-Z._]/-}` так как в этом случае можно будет создавать образы не только из тэгов, но и из веток, причём не опасаясь, что в них попадут спецсимволы, несовместимые с докер тэгами.
+
+
 
 ---
 ---
