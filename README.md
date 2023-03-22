@@ -4139,17 +4139,41 @@ deploy/charts/
 
 #### Подготовка Kubernetes кластера | Задание со ⭐
 
-> Самостоятельно реализуйте установку istio как GKE аддона ([ссылка на документацию](https://cloud.google.com/istio/docs/istio-on-gke/installing)) 
+> Самостоятельно реализуйте установку istio как GKE аддона ([ссылка на документацию](https://cloud.google.com/istio/docs/istio-on-gke/installing))
 
-Данный подход устарел несколько лет назад, сейчас в GKE используется Anthos Service Mesh, сама формулировка неверная.
+Данный подход устарел несколько лет назад, сейчас в GKE используется Anthos Service Mesh (ASM).
+
+Однако, так как по ходу домашнего задания предполагается установка istio с помощью istioctl и Flagger, которые требуют противоположных опций (https://docs.flagger.app/install/flagger-install-on-google-cloud), то для начала было решено создать кластер без активации ASM, чтобы впоследствии точно определиться с параметрами создания.
 
 
+Сейчас есть ASM:
+* Модуль терраформ - https://github.com/terraform-google-modules/terraform-google-kubernetes-engine/tree/master/modules/asm
+* Документация - https://cloud.google.com/service-mesh/docs/managed/install-anthos-service-mesh-console
+
+Для GKE он требует следующего:
+
+* A mesh_id label (formatted as mesh_id: proj-669040206528) is added to the cluster to identify the mesh it is part of.
+* Cloud Monitoring is enabled on the cluster. Anthos Service Mesh uses Cloud Monitoring to provide automatic telemetry and logs.
+* Workload Identity is enabled on the cluster. Anthos Service Mesh uses Workload Identity to provide secure access to required Google APIs and resources.
+* In order to secure, monitor, and manage the service mesh, the mesh.googleapis.com API is enabled (if it hasn't been already).
+* The Cluster is registered to the project's Fleet, and the Anthos Service Mesh Fleet feature is enabled.
+* The managed control plane is provisioned and set up to use a revision that matches the GKE channel configured on the cluster
+
+То есть от параметров по умолчанию отличается необходимостью определять Workload Identity, mesh_id label и включать саму опцию сетки и API.
+
+
+**Google fleet** - Fleets are a Google Cloud concept for logically organizing clusters and other resources, letting you use and manage multi-cluster capabilities and apply consistent policies across your systems.
+
+A fleet provides a way to logically group and normalize Kubernetes clusters, making administration of infrastructure easier. A fleet can be entirely made up of Google Kubernetes Engine clusters on Google Cloud, or include clusters outside Google Cloud.
+The implementation of fleets, like many other Google Cloud resources, is rooted in a Google Cloud project, which we refer to as the fleet host project.
+
+An important concept in fleets is the concept of **sameness**. This means that some Kubernetes objects such as namespaces with the same name in different clusters are treated as the same thing. This normalization is done to make administering fleet resources more tractable.
 
 #### Continuous Integration | Задание со ⭐
 
 В связи с тем, что внутри проекта уже есть баш-скрипт, который занимается сборкой образов, к тому же параметризован, проще всего использовать именно его для включение в CI `hack/make-docker-images.sh`.
 
-В таком случае наш CI выглядит просто как 
+В таком случае наш CI выглядит просто как
 
 ```yaml
   services:
