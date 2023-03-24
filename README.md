@@ -4107,6 +4107,99 @@ fi
 
 ## Homework 10 (GitOps)
 
+### GitOps
+
+**GitOps** - путь управления инфраструктурой и приложениями, в котором вся система описывается декларативно в системе контроля версий (в git-е преимущественно) и который имеет автоматизированный процесс синхронизации между развёрнутой инфраструктурой и репозиторием, отвечающий за то, чтобы состояния в них совпадали.
+
+GitOps зиждется на **4х** требованиях:
+1. **Declarative** - система, управляемая посредством GitOps, должна иметь целевое состояние, описываемое декларативно
+2. **Versioned and Immutable** - хранилище с желаемым состоянием версионируется и содержит полную историю изменений
+3. **Pulled Automatically** - изменения состояния источника автоматически подтягиваются в инфраструктуру агентами
+4. **Continiously Reconiled** - агенты постоянно сверяют состояния, проверяя на наличие ошибок и уведомляя в случае необходимости
+
+Как раз в 4м пункте отличие pull от push модели. И за её реализацию отвечает "Convergency-operator", то есть агент.
+
+Convergency-operator занимается применением изменений конфигурации:
+* Не прекращает работать до тех пор, пока конфигурация кластера не станет идентичной описанию в репозитории
+  * Alert, если идентичность не достигнута
+  * Уведомление, если идентичность достигнута
+
+
+Плюсов, как и минусов, у гитопса много.
+
+Плюсы:
+* Developer Experience: Разработчики работают с кодом (Git), а не с Kubernetes
+* Безопасность: нет необходимости заниматься прямым доступом в кластер и настройкой прав для каждого репозитория, так как есть единая точка синхронизации.
+* История Git становится не только историей изменений приложения, но и audit-логом и историей операционных изменений
+* Конвергенция и стандартизация: С большей определенностью можем предугадать состояние кластера
+* Продуктовая разработка:
+    * Сокращение Mean Time to Deployment - составной части Lead Time
+    * С использованием дополнительных подходов ( Zero Downtime Deployment , Feature flags ) есть возможность увеличить метрику Deployment frequency.
+* Надежность: Сокращение MTTR (Mean time to recovery) благодаря использованию Git как SSOT (Single source of truth)
+* Доступность: Упрощаются процессы масштабирования - разрабам нужно только образы и чарты предоставлять, CD может быть копи-пастой в другом репо
+
+
+Наиболее очевидные минусы:
+* Откат не просто нажать кнопку с деплоем в пайплайне, а нужно сделать ревёрт, что гораздо дольше и требует прав
+* Тот кто вливает изменения в основную ветку синхронизации
+* Менее управляемый и гибкий процесс - нельзя выкатить какую хочешь ветку, настроить поэтапную развёртку сервисных приложений в кластер, которые зависят друг от друга (prometheus > service monitors > cert-manager > issuers > ingress, например)
+### Flux2
+
+"Just push to Git and Flux does the rest".
+
+Также умеет посылать алерты и самостоятельно обновлять тэги образов в йамлах, если появляются более новые.
+#### Terminology
+
+**Source** означает репозиторий, содержащий желаемое состояние системы и требования по его достижению. Например - latest 1.x tag available from a Git repository over SSH.
+
+Sources создают "артефакты", которые используются другими компонентами Flux, выполняющими какие-либо действия. Source может быть использован несколькими потребителями (consumers), чтобы отделить конфигурацию от хранилища данных.
+
+Источник проверяется на наличие изменений в определённый период времени и, если в нём обнаружена новая версия, которая соответствола бы критерию (например последняя 1.х), то создаётся новый "артефакт".
+
+Все источники определены как Custom Resources в Kubernetes кластере, например - GitRepository, OCIRepository, HelmRepository и Bucket ресурсы.
+
+**Reconciliation** обеспечивает, что данное состояние (то есть приложение или инфраструктура в кластере) совпадает с желаемым состоянием, описанным где-то. Например в Git-е.
+
+Несколько примеров из Flux, для каждого из которых существует свой контроллер:
+
+* **HelmRelease reconciliation**: обеспечивает совпадение состояния Helm-release с тем, что описано в ресурсе и запускает обновление чарта, если состояния не совпадают.
+* **Bucket reconciliation**: загружает и архивирует содержимое заданного хранилища в определённый период времени и сохраняет его как артефакт, записывая наблюдаемую ревизию артефакта и сам артефакт в статусе кастом ресурса.
+* **Kustomization reconciliation**: обеспечивает совпадение состояний в кластере с ресурсами определёнными в Git или OCI-репозиториях, или, даже, S3 bucket-е.
+
+**Kustomization custom resource** represents a local set of Kubernetes resources (e.g. kustomize overlay) that Flux is supposed to reconcile in the cluster. The reconciliation runs every five minutes by default, but this can be changed with .spec.interval. If you make any changes to the cluster using kubectl edit/patch/delete, they will be promptly reverted. You either suspend the reconciliation or push your changes to a Git repository.
+
+Установка Flux-ом компонентов в стиле GitOps называется **bootstrap**.
+Flux может управлять сам собой так же как и другими ресурсами.
+Для bootstrap-а можно использовать flux CLI или Terraform Provider.
+
+#### GitOps Toolkit
+The GitOps Toolkit is the set of APIs and controllers that make up the runtime for Flux v2. The APIs comprise Kubernetes custom resources, which can be created and updated by a cluster user, or by other automation tooling.
+
+![GitOps Toolkit](https://raw.githubusercontent.com/fluxcd/flux2/968f249562b053e52eb9c915cca739a340b092a3/docs/_files/gitops-toolkit.png)
+
+**Components**
+* Source Controller
+  * GitRepository CRD
+  * OCIRepository CRD
+  * HelmRepository CRD
+  * HelmChart CRD
+  * Bucket CRD
+* Kustomize Controller
+  * Kustomization CRD
+* Helm Controller
+  * HelmRelease CRD
+* Notification Controller
+  * Provider CRD
+  * Alert CRD
+  * Receiver CRD
+* Image Automation Controllers
+  * ImageRepository CRD
+  * ImagePolicy CRD
+  * ImageUpdateAutomation CRD
+
+
+### Some links
+
 https://habr.com/ru/company/flant/blog/526102/
 
 https://cloud.yandex.ru/training/training-pro
@@ -4143,10 +4236,13 @@ deploy/charts/
 
 Данный подход устарел несколько лет назад, сейчас в GKE используется Anthos Service Mesh (ASM).
 
-Однако, так как по ходу домашнего задания предполагается установка istio с помощью istioctl и Flagger, которые требуют противоположных опций (https://docs.flagger.app/install/flagger-install-on-google-cloud), то для начала было решено создать кластер без активации ASM, чтобы впоследствии точно определиться с параметрами создания.
+Однако, так как по ходу домашнего задания предполагается установка istio с помощью istioctl и Flagger, которые требуют противоположных опций (https://docs.flagger.app/install/flagger-install-on-google-cloud), то для начала было решено использовать terraform для создания обычного кластера без активации ASM, чтобы впоследствии точно определиться с параметрами создания.
 
+<details>
+  <summary>**Collapsible block about ASM**</summary>
 
-Сейчас есть ASM:
+  ### ASM
+
 * Модуль терраформ - https://github.com/terraform-google-modules/terraform-google-kubernetes-engine/tree/master/modules/asm
 * Документация - https://cloud.google.com/service-mesh/docs/managed/install-anthos-service-mesh-console
 
@@ -4169,6 +4265,13 @@ The implementation of fleets, like many other Google Cloud resources, is rooted 
 
 An important concept in fleets is the concept of **sameness**. This means that some Kubernetes objects such as namespaces with the same name in different clusters are treated as the same thing. This normalization is done to make administering fleet resources more tractable.
 
+
+Google Cloud GKE clusters have CNI enabled when any of the following features are enabled: network policy, intranode visibility, **workload identity**, pod security policy, or dataplane v2.
+https://istio.io/latest/docs/setup/additional-setup/cni/#prerequisites
+
+</details>
+
+
 #### Continuous Integration | Задание со ⭐
 
 В связи с тем, что внутри проекта уже есть баш-скрипт, который занимается сборкой образов, к тому же параметризован, проще всего использовать именно его для включение в CI `hack/make-docker-images.sh`.
@@ -4190,7 +4293,135 @@ An important concept in fleets is the concept of **sameness**. This means that s
 
 Вместо предложенного в ДЗ `CUSTOM_REF_NAME_SLUG=${CI_COMMIT_REF_NAME//[^0-9a-zA-Z._]/-}`, используется `CUSTOM_REF_NAME_SLUG=${CI_COMMIT_REF_NAME//[^0-9a-zA-Z._]/-}` так как в этом случае можно будет создавать образы не только из тэгов, но и из веток, причём не опасаясь, что в них попадут спецсимволы, несовместимые с докер тэгами.
 
+#### Flux2 + Gitlab
 
+Так как Flux первой версии устарел, то было решено переключиться на актуальную версию и работать с ней.
+
+И так как используется Gitlab, то проще всего использовать команду `flux bootstrap gitlab` - она позволяет установить в кластер все необходимые для работы flux CRD, а также, бесшовно обновлять компоненты, в случае апгрейда.
+
+Gitlab рекомендует использовать не персональный токен, как написано в документации самого flux, а `project access token` - https://docs.gitlab.com/ee/user/clusters/agent/gitops/flux.html#bootstrap-installation.
+```
+create a project access token with the following settings:
+    From the Select a role dropdown list, select Maintainer.
+    Under Select scopes, select the API and write_repository checkboxes.
+```
+
+Согласно конфигурации из ДЗ, нам необходимо деплоить всё что в deploy/ раз в минуту:
+```yaml
+git:
+  url: git@gitlab.com:avtandilko/microservices-demo.git
+  path: deploy
+  ciSkip: true
+  pollInterval: 1m
+registry:
+  automationInterval: 1m
+```
+
+Системный Namespace для flux по умолчанию `"flux-system"` решил не менять.
+
+Установка:
+```bash
+❯ export GITLAB_TOKEN="PROJECT_ACCESS_TOKEN_WITH_API_AND_READ_AND_WRITE"
+flux bootstrap gitlab \
+  --personal \
+  --owner=Ivorlun \
+  --repository=microservices-demo \
+  --private=false \
+  --branch=main \
+  --path=flux-config \
+  --token-auth
+► connecting to https://gitlab.com
+► cloning branch "main" from Git repository "https://gitlab.com/Ivorlun/microservices-demo.git"
+✔ cloned repository
+► generating component manifests
+✔ generated component manifests
+✔ committed sync manifests to "main" ("9954bb96b8ac8bfffa85b2c94e4c530b12728a3b")
+► pushing component manifests to "https://gitlab.com/Ivorlun/microservices-demo.git"
+► installing components in "flux-system" namespace
+✔ installed components
+✔ reconciled components
+► determining if source secret "flux-system/flux-system" exists
+► generating source secret
+► applying source secret "flux-system/flux-system"
+✔ reconciled source secret
+► generating sync manifests
+✔ generated sync manifests
+✔ committed sync manifests to "main" ("9cf3e6fdbe707317ca6146a86b81eaeb8948e782")
+► pushing sync manifests to "https://gitlab.com/Ivorlun/microservices-demo.git"
+► applying sync manifests
+✔ reconciled sync configuration
+◎ waiting for Kustomization "flux-system/flux-system" to be reconciled
+✔ Kustomization reconciled successfully
+► confirming components are healthy
+✔ helm-controller: deployment ready
+✔ kustomize-controller: deployment ready
+✔ notification-controller: deployment ready
+✔ source-controller: deployment ready
+✔ all components are healthy
+```
+
+<details>
+  <summary>Подтверждение успешной развёртки</summary>
+После чего git pull выдаёт:
+
+```bash
+Updating 0b01a90..9cf3e6f
+Fast-forward
+flux-config/flux-system/gotk-components.yaml | 6788 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+flux-config/flux-system/gotk-sync.yaml       |   27 +
+flux-config/flux-system/kustomization.yaml   |    5 +
+3 files changed, 6820 insertions(+)
+create mode 100644 flux-config/flux-system/gotk-components.yaml
+create mode 100644 flux-config/flux-system/gotk-sync.yaml
+create mode 100644 flux-config/flux-system/kustomization.yaml
+```
+Соответственно:
+* kustomization.yaml - Пишет какие йамлы нужно синхронизировать контроллеру кастомизации
+* gotk-components.yaml - CRD и оператор
+* gotk-sync.yaml - Правила синхронизации
+
+
+```bash
+❯ k get deploy  -n flux-system
+NAME                      READY   UP-TO-DATE   AVAILABLE   AGE
+helm-controller           1/1     1            1           4m1s
+kustomize-controller      1/1     1            1           4m1s
+notification-controller   1/1     1            1           4m1s
+source-controller         1/1     1            1           4m1s
+
+❯ flux get all
+NAME                     	REVISION          	SUSPENDED	READY	MESSAGE
+gitrepository/flux-system	main@sha1:9cf3e6fd	False    	True 	stored artifact for revision 'main@sha1:9cf3e6fd'
+
+NAME                     	REVISION          	SUSPENDED	READY	MESSAGE
+kustomization/flux-system	main@sha1:9cf3e6fd	False    	True 	Applied revision: main@sha1:9cf3e6fd
+```
+</details>
+
+Так как у нас управляющий flux-ом репозиторий и целевой для управления приложением совпадают, то необходимости создавать CR с типом GitRepo - нет.
+
+Но есть необходимость создать CR типа Helm Release и неймспейс для них, как предложено в ДЗ.
+
+Итого у нас во `flux-config/flux-system` будут находится манифесты для флакса и его синхронизации, а в `deploy` - helm chart-ы и kustomization манифесты (обычные, просто тип такой).
+
+Так как namespace.yaml является обычным манифестом, то необходимо выполнить команду `flux create kustomization` и добавить его в уже отслеживаемую директорию flux-config, чтобы его синхронизировать.
+
+```bash
+flux create kustomization microservices-demo-ns \
+  --source=flux-system \
+  --path="./deploy/namespaces" \
+  --prune=true \
+  --interval=1m \
+  --export > ./flux-config/microservices-demo/microservices-demo-ns-kustomization.yaml
+```
+создастся манифест c kind kustomization, который надо запушить.
+
+Несмотря на то, что в домашке сказано, что все чарты спокойно могут лежать в /deploy/charts, а ns.yaml мы создаём в deploy и flux как раз отслеживает deploy - это не так, так как возникает ошибка:
+```log
+2023-03-24T18:38:11.186Z error Kustomization/microservices-demo-ns.flux-system - Reconciliation failed after 115.075354ms, next try in 1m0s failed to decode Kubernetes YAML from /tmp/kustomization-3056750020/deploy/charts/adservice/Chart.yaml: missing kind in object {{v2 } {{ } map[] map[]}} <nil>
+2023-03-24T18:38:11.187Z info Kustomization/microservices-demo-ns.flux-system - Discarding event, no alerts found for the involved object
+```
+Поэтому меняем путь на точный: "./deploy/namespaces"
 
 ---
 ---
