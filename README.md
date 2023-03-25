@@ -4443,6 +4443,54 @@ flux create hr frontend \
   --export > ./flux-config/microservices-demo/microservices-demo-frontend-release.yaml
 ```
 
+После проверки, что фронтенд работает корректно, размножаем эту логику на все микросервисы:
+
+```bash
+❯ k get all -n microservices-demo
+NAME                           READY   STATUS    RESTARTS   AGE
+pod/frontend-6d5c7b87f-bfj8z   1/1     Running   0          25m
+
+NAME                        TYPE           CLUSTER-IP     EXTERNAL-IP    PORT(S)        AGE
+service/frontend            ClusterIP      10.71.242.3    <none>         80/TCP         25m
+service/frontend-external   LoadBalancer   10.71.242.81   34.147.0.215   80:30985/TCP   25m
+
+NAME                       READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/frontend   1/1     1            1           25m
+
+NAME                                 DESIRED   CURRENT   READY   AGE
+replicaset.apps/frontend-6d5c7b87f   1         1         1       25m
+
+❯ for i in $(ls deploy/charts); do
+cp -fv deploy/release/frontend.values.yaml deploy/release/$i.values.yaml
+flux create hr $i \
+  --interval=1m \
+  --source=gitrepository/flux-system \
+  --chart=./deploy/charts/$i \
+  --target-namespace=microservices-demo \
+  --create-target-namespace=true \
+  --values=./deploy/release/$i.values.yaml \
+  --export > ./flux-config/microservices-demo/microservices-demo-$i-release.yaml
+done
+```
+
+Проверяем, что всё работает:
+```
+NAME↑                        TYPE                CLUSTER-IP           EXTERNAL-IP         PORTS                  AGE           │
+│ adservice                    ClusterIP           10.71.251.91                             grpc:9555►0            6m13s         │
+│ cartservice                  ClusterIP           10.71.241.4                              grpc:7070►0            6m13s         │
+│ currencyservice              ClusterIP           10.71.247.253                            grpc:7000►0            6m13s         │
+│ emailservice                 ClusterIP           10.71.246.77                             grpc:5000►0            6m12s         │
+│ frontend                     ClusterIP           10.71.242.3                              http:80►0              35m           │
+│ frontend-external            LoadBalancer        10.71.242.81         34.147.0.215        http:80►30985          35m           │
+│ paymentservice               ClusterIP           10.71.248.152                            grpc:50051►0           5m48s         │
+│ productcatalogservice        ClusterIP           10.71.243.185                            grpc:3550►0            5m52s         │
+│ recommendationservice        ClusterIP           10.71.251.74                             grpc:8080►0            5m44s         │
+│ redis-cart                   ClusterIP           10.71.245.193                            tcp-redis:6379►0       6m13s         │
+│ shippingservice              ClusterIP           10.71.252.226                            grpc:50051►0           5m40s
+```
+
+При этом по адресу приложение открывается и вся логика так же работает.
+
 ---
 ---
 
