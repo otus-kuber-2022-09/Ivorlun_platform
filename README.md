@@ -4553,20 +4553,94 @@ flux create image update microservices-demo-frontend \
 --export > ./flux-config/microservices-demo/microservices-demo-frontend-automation.yaml
 ```
 
-После чего меняем код в образе фронта, пересобираем его и пушим в докер реджистри, закономерно получая через минуту:
+После чего меняем код в образе фронта, пересобираем его и пушим в докер реджистри, закономерно получая через минуту commmit от flux-а:
 https://gitlab.com/Ivorlun/microservices-demo/-/commit/ca12a4c2702266daa1707254b98e4fd4c89609ea
 ```yaml
     images:
       repository: ivorlun
 -     tag: v0.0.1 # {"$imagepolicy": "flux-system:microservices-demo-frontend:tag"}
 +     tag: v0.0.2 # {"$imagepolicy": "flux-system:microservices-demo-frontend:tag"}
+```
 
+И тут же обновление образа внутри самого деплоймента, которое легко увидеть на главной странице развёрнутого приложения.
+
+```bash
+❯ k -n microservices-demo get deployments.apps frontend -o yaml | grep image
+        image: ivorlun/frontend:v0.0.2
 ```
 
 #### Flagger + Istio
 
 Flagger зависит от телеметрии и Prometheus из Istio (https://docs.flagger.app/install/flagger-install-on-kubernetes#install-flagger-with-helm), так что при установке Istio необходимо использовать `default profile` (https://istio.io/latest/docs/setup/additional-setup/config-profiles/).
 
+Наиболее простой вариант установки istio в кластер с помощью `istioctl install --set profile=default`.
+Можно также посмотреть что именно будет развёрнуто в кластер через `istioctl manifest generate > $HOME/generated-manifest.yaml`.
+
+Однако, я пошёл другим путём.
+
+##### Установка **Istio** | Задание со ⭐
+
+Ставлю Istio через helm chart, так как именно оператор сейчас считается устаревшим, а helm поддерживается впротивовес тому, что указано на слайде ДЗ на 31-32.
+
+Ставим сначала основу для istio, затем istio discovery и gateway для возможности обращаться к приложениям извне.
+
+```bash
+helm upgrade --install istio-base base --namespace istio-system --create-namespace --repo https://istio-release.storage.googleapis.com/charts
+helm install istiod istiod -n istio-system --repo https://istio-release.storage.googleapis.com/charts --wait
+helm install istio-ingress gateway --namespace istio-ingress --create-namespace --repo https://istio-release.storage.googleapis.com/charts  --wait
+```
+
+##### Установка **Flagger**
+Ставим сначала CRD типа Canary для Flagger:
+`kubectl apply -f https://raw.githubusercontent.com/fluxcd/flagger/main/artifacts/flagger/crd.yaml`
+
+Устанавливаем flagger и говорим, что меш провайдер - istio:
+```bash
+helm upgrade -i flagger flagger \
+--repo https://flagger.app \
+--namespace=istio-system \
+--set crd.create=true \
+--set meshProvider=istio \
+--set metricsServer=http://prometheus:9090
+```
+
+Добавляем в ns `microservices-demo` (deploy/namespaces/namespace.yaml) label, чтобы istio автоматически добавлял во все поды сайдкары
+```yaml
+kind: Namespace
+metadata:
+  name: microservices-demo
+  labels:
+    istio-injection: enabled
+```
+и делаем пуш, после чего flux сам автоматически подтянет изменения.
+
+Чтобы pods обновились, удаляем их всех, ожидая их восстановления.
+
+
+### HomeWork 16 (Service Mesh)
+
+Istio базируется на 4х основных векторах:
+
+* Управление трафиком - контроль и роутинг
+* Безопасность - аутентификация и авторизация
+* Observability (Наблюдаемость) - телеметрия и мониторинг
+* Расширяемость - через систему WebAssembly плагинов
+
+#### Traffic management
+#### Security
+#### Observability
+
+Istio генерирует детальную телеметрию для всех взаимодействий между сервисами внутри сетки. Телеметрия позволяет наблюдать за поведением сервисов, позволяя администраторам обслуживать и оптимизировать приложения без возложения дополнительной нагрузки на разработчиков. Причём Istio позволяет администраторам понимать как отслеживаемые сервисы взаимодействуют как с другими сервисами, так и с самими компонентами Istio.
+
+Istio генетирует следующие типы телеметрии, чтобы предоставить общую картину наблюдаемости для  service mesh:
+
+* **Metrics** Istio генерирует набор метрик основываясь на 4х золотых сигналах мониторинга (“golden signals” of monitoring - latency, traffic, errors, and saturation). Причём Istio предоставляет метрики сразу 3х типов     Proxy-level, Service-level и Mesh Control plane.  A default set of mesh monitoring dashboards built on top of these metrics is also provided.
+* **Distributed Traces**. Istio generates distributed trace spans for each service, providing operators with a detailed understanding of call flows and service dependencies within a mesh.
+* **Access Logs**. As traffic flows into a service within a mesh, Istio can generate a full record of each request, including source and destination metadata. This information enables operators to audit service behavior down to the individual workload instance level.
+
+#### Extensibility
+WebAssembly is a sandboxing technology which can be used to extend the Istio proxy (Envoy). The Proxy-Wasm sandbox API replaces Mixer as the primary extension mechanism in Istio.
+https://istio.io/latest/docs/concepts/wasm/
 
 ---
 ---
