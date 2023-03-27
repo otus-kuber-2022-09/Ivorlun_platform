@@ -4335,6 +4335,7 @@ registry:
 ```bash
 ❯ export GITLAB_TOKEN="PROJECT_ACCESS_TOKEN_WITH_API_AND_READ_AND_WRITE"
 flux bootstrap gitlab \
+  --components-extra=image-reflector-controller,image-automation-controller \
   --personal \
   --owner=Ivorlun \
   --repository=microservices-demo \
@@ -4552,6 +4553,15 @@ flux create image update microservices-demo-frontend \
 --export > ./flux-config/microservices-demo/microservices-demo-frontend-automation.yaml
 ```
 
+После чего меняем код в образе фронта, пересобираем его и пушим в докер реджистри, закономерно получая через минуту:
+https://gitlab.com/Ivorlun/microservices-demo/-/commit/ca12a4c2702266daa1707254b98e4fd4c89609ea
+```yaml
+    images:
+      repository: ivorlun
+-     tag: v0.0.1 # {"$imagepolicy": "flux-system:microservices-demo-frontend:tag"}
++     tag: v0.0.2 # {"$imagepolicy": "flux-system:microservices-demo-frontend:tag"}
+
+```
 
 #### Flagger + Istio
 
