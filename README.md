@@ -4105,7 +4105,7 @@ fi
 
 ---
 
-## Homework 10 (GitOps)
+## Homework 10 (GitOps + Service Mesh)
 
 ### GitOps
 
@@ -4168,17 +4168,17 @@ Sources создают "артефакты", которые используют
 * **Bucket reconciliation**: загружает и архивирует содержимое заданного хранилища в определённый период времени и сохраняет его как артефакт, записывая наблюдаемую ревизию артефакта и сам артефакт в статусе кастом ресурса.
 * **Kustomization reconciliation**: обеспечивает совпадение состояний в кластере с ресурсами определёнными в Git или OCI-репозиториях, или, даже, S3 bucket-е.
 
-**Kustomization custom resource** represents a local set of Kubernetes resources (e.g. kustomize overlay) that Flux is supposed to reconcile in the cluster. The reconciliation runs every five minutes by default, but this can be changed with .spec.interval. If you make any changes to the cluster using kubectl edit/patch/delete, they will be promptly reverted. You either suspend the reconciliation or push your changes to a Git repository.
+**Kustomization custom resource** - это **НЕ классический Kustomize**, а просто CR, который отвечает за набор yaml файлов в Git, которые будет синронизировать каждые 5 минут по умолчанию. Если в кластере что-то изменить руками, то эти изменения тут же перезапишутся контроллером, который восстановит описанной в гите состояние. Так что нужно либо пушить в гит, либо приостанавливать автообновление из него.
 
 Установка Flux-ом компонентов в стиле GitOps называется **bootstrap**.
 Flux может управлять сам собой так же как и другими ресурсами.
 Для bootstrap-а можно использовать flux CLI или Terraform Provider.
 
-Более правильно отделять репозиторий с flux config-ами от репозитория с приложением, чтобы
+Более правильно отделять репозиторий с flux config-ами от репозитория с приложением, чтобы:
 1. Были отдельные жизненные циклы и не нужно было менять исходный код приложения при необходимости отката. То есть нужен роллбэк - пожалуйста, просто поменять версию образа в репо флакса, не трогая репо приложения.
 2. Была единая инфраструктурная точка для многих репозиториев с исходниками. Если много сервисов, то удобно их развёртку иметь в одном месте ещё и с точки зрения прав на проекты, деплой и тп.
 
-#### GitOps Toolkit
+#### **GitOps Toolkit
 The GitOps Toolkit is the set of APIs and controllers that make up the runtime for Flux v2. The APIs comprise Kubernetes custom resources, which can be created and updated by a cluster user, or by other automation tooling.
 
 ![GitOps Toolkit](https://raw.githubusercontent.com/fluxcd/flux2/968f249562b053e52eb9c915cca739a340b092a3/docs/_files/gitops-toolkit.png)
@@ -4244,6 +4244,8 @@ deploy/charts/
 
 Однако, так как по ходу домашнего задания предполагается установка istio с помощью istioctl и Flagger, которые требуют противоположных опций (https://docs.flagger.app/install/flagger-install-on-google-cloud), то для начала было решено использовать terraform для создания обычного кластера без активации ASM, чтобы впоследствии точно определиться с параметрами создания.
 
+Обычная установка Istio для однокластерного публичного режима без CNI не требует дополнительных настроек от GKE на данный момент https://istio.io/latest/docs/setup/platform-setup/gke/, кроме cluster-admin RBAC.
+
 <details>
   <summary>**Collapsible block about ASM**</summary>
 
@@ -4276,7 +4278,7 @@ Google Cloud GKE clusters have CNI enabled when any of the following features ar
 https://istio.io/latest/docs/setup/additional-setup/cni/#prerequisites
 
 </details>
-
+</br>
 
 #### Continuous Integration | Задание со ⭐
 
@@ -4305,7 +4307,11 @@ https://istio.io/latest/docs/setup/additional-setup/cni/#prerequisites
 
 И так как используется Gitlab, то проще всего использовать команду `flux bootstrap gitlab` - она позволяет установить в кластер все необходимые для работы flux CRD, а также, бесшовно обновлять компоненты, в случае апгрейда.
 
-Gitlab рекомендует использовать не персональный токен, как написано в документации самого flux, а `project access token` - https://docs.gitlab.com/ee/user/clusters/agent/gitops/flux.html#bootstrap-installation.
+Более правильно отделять репозиторий с flux config-ами от репозитория с приложением, но в данном случае так как весь код в одном репо и нет других пользователей - это не проблема.
+
+Кроме того, flux рекомендует использовать следующий подход как best practice по удобной организации репозитория - https://fluxcd.io/flux/guides/repository-structure/, чтобы иметь возможность гибко работать с разными окружениями, кластерами и командами.
+
+В таком случае Gitlab рекомендует использовать не персональный токен, как написано в документации самого flux, а `project access token` - https://docs.gitlab.com/ee/user/clusters/agent/gitops/flux.html#bootstrap-installation.
 ```
 create a project access token with the following settings:
     From the Select a role dropdown list, select Maintainer.
@@ -4324,8 +4330,6 @@ registry:
 ```
 
 Системный Namespace для flux по умолчанию `"flux-system"` решил не менять.
-
-Более правильно отделять репозиторий с flux config-ами от репозитория с приложением, но в данном случае так как весь код в одном репо и нет других пользователей - это не проблема.
 
 Установка:
 ```bash
@@ -4405,6 +4409,7 @@ NAME                     	REVISION          	SUSPENDED	READY	MESSAGE
 kustomization/flux-system	main@sha1:9cf3e6fd	False    	True 	Applied revision: main@sha1:9cf3e6fd
 ```
 </details>
+<br />
 
 Так как у нас управляющий flux-ом репозиторий и целевой для управления приложением совпадают, то необходимости создавать CR с типом GitRepo - нет.
 
@@ -4429,9 +4434,9 @@ flux create kustomization microservices-demo-ns \
 2023-03-24T18:38:11.186Z error Kustomization/microservices-demo-ns.flux-system - Reconciliation failed after 115.075354ms, next try in 1m0s failed to decode Kubernetes YAML from /tmp/kustomization-3056750020/deploy/charts/adservice/Chart.yaml: missing kind in object {{v2 } {{ } map[] map[]}} <nil>
 2023-03-24T18:38:11.187Z info Kustomization/microservices-demo-ns.flux-system - Discarding event, no alerts found for the involved object
 ```
-Поэтому меняем путь на точный: "./deploy/namespaces"
+Поэтому меняем путь на точный: `./deploy/namespaces`
 
-Так как наши чарты находятся вместе с исходниками в гите, а не в хабе для чартов, то необходимо создать ещё один манифест, описывающий CR типа Helm Release с источником GitRepository и с values:
+Так как наши чарты находятся вместе с исходниками в гите, а не в хабе для чартов, то необходимо создать ещё один манифест, описывающий CR типа Helm Release с источником GitRepository и с values-файлами (на данный момент поддержки значений как аргументов нет):
 ```bash
 flux create hr frontend \
   --interval=1m \
@@ -4439,7 +4444,7 @@ flux create hr frontend \
   --chart=./deploy/charts/frontend \
   --target-namespace=microservices-demo \
   --create-target-namespace=true \
-  --values=./deploy/release/frontend.values.yaml \
+  --values=./deploy/release/initial.frontend.values.yaml \
   --export > ./flux-config/microservices-demo/microservices-demo-frontend-release.yaml
 ```
 
@@ -4461,14 +4466,14 @@ NAME                                 DESIRED   CURRENT   READY   AGE
 replicaset.apps/frontend-6d5c7b87f   1         1         1       25m
 
 ❯ for i in $(ls deploy/charts); do
-cp -fv deploy/release/frontend.values.yaml deploy/release/$i.values.yaml
+cp -fv deploy/release/initial.frontend.values.yaml deploy/release/initial.$i.values.yaml
 flux create hr $i \
   --interval=1m \
   --source=gitrepository/flux-system \
   --chart=./deploy/charts/$i \
   --target-namespace=microservices-demo \
   --create-target-namespace=true \
-  --values=./deploy/release/$i.values.yaml \
+  --values=./deploy/release/initial.$i.values.yaml \
   --export > ./flux-config/microservices-demo/microservices-demo-$i-release.yaml
 done
 ```
@@ -4490,6 +4495,68 @@ NAME↑                        TYPE                CLUSTER-IP           EXTERNAL
 ```
 
 При этом по адресу приложение открывается и вся логика так же работает.
+
+##### **Images autoupdate**
+Хотя, в целом, практику автопуша тэгов образов в репозиторий я считаю крайне спорной, а соответствующую настройку flux-а - перегруженной, проведём эксперименты с данным фунционалом.
+
+В рамках ДЗ рассматривается функционал первой версии flux, в которой автообновление образов в репозитории настраивалось сразу в yaml-е HelmRelease ресурса и реализовывалось в 2 аннотации.
+
+Сейчас же это настраивается более гибким образом, но куда более сложным https://fluxcd.io/flux/guides/image-update/.
+
+По умолчанию контроллеры, оперирующие образами, отсутствуют при установке по умолчанию и их необходимо установить, включив опции:
+```bash
+flux bootstrap gitlab \
+  --components-extra=image-reflector-controller,image-automation-controller
+  ...
+```
+
+После этого требуется 3 + 1 составляющая:
+1. CR `ImageRepository`, который будет проверять нужный хаб с образами на наличие новой версии в заданный промежуток времени по аналогии с `GitRepository`
+1. CR `ImagePolicy`, которая будет определять в каком диапазоне версий искомые нами образы будут считаться подходящими
+1. CR `ImageUpdateAutomation` - в какой репозиторий пушить изменения с данным образом
+1. +1 дополнительная часть: комментарий, который нужно вносить рядом с тэгом образа в сам yaml манифест вида `# {"$imagepolicy": "flux-system:frontend"}`
+
+Стоит отметить, что можно обновлять не только тэг, но и имя образа, а также использовать вебхуки.
+```yaml
+spec:
+  values:
+    image:
+      repository: ghcr.io/stefanprodan/podinfo # {"$imagepolicy": "flux-system:podinfo:name"}
+      tag: 5.0.0  # {"$imagepolicy": "flux-system:podinfo:tag"}
+```
+Нам требуется как раз последний, так как образ и его префикс менять не собираемся.
+
+
+Создаём ресурсы по порядку:
+```bash
+flux create image repository microservices-demo-frontend \
+--image=ivorlun/frontend \
+--interval=1m \
+--export > ./flux-config/microservices-demo/microservices-demo-frontend-registry.yaml
+
+flux create image policy microservices-demo-frontend \
+--image-ref=microservices-demo-frontend \
+--select-semver=v0.0.x \
+--export > ./flux-config/microservices-demo/microservices-demo-frontend-policy.yaml
+
+sed -i 's/v0.0.1/v0.0.1 # {"$imagepolicy": "flux-system:microservices-demo-frontend:tag"}/g' flux-config/microservices-demo/microservices-demo-frontend-release.yaml
+
+flux create image update microservices-demo-frontend \
+--git-repo-ref=flux-system \
+--git-repo-path="./flux-config/microservices-demo" \
+--checkout-branch=main \
+--push-branch=main \
+--author-name=fluxcdbot \
+--author-email=fluxcdbot@users.noreply.github.com \
+--commit-template="{{range .Updated.Images}}{{println .}}{{end}}" \
+--export > ./flux-config/microservices-demo/microservices-demo-frontend-automation.yaml
+```
+
+
+#### Flagger + Istio
+
+Flagger зависит от телеметрии и Prometheus из Istio (https://docs.flagger.app/install/flagger-install-on-kubernetes#install-flagger-with-helm), так что при установке Istio необходимо использовать `default profile` (https://istio.io/latest/docs/setup/additional-setup/config-profiles/).
+
 
 ---
 ---
