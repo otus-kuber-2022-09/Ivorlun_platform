@@ -4421,14 +4421,14 @@ kustomization/flux-system	main@sha1:9cf3e6fd	False    	True 	Applied revision: m
 Так как namespace.yaml является обычным манифестом, то необходимо выполнить команду `flux create kustomization` и добавить его в уже отслеживаемую директорию flux-config, чтобы его синхронизировать.
 
 ```bash
-flux create kustomization microservices-demo-ns \
-  --source=flux-system \
+flux create kustomization namespaces-yamls \
+  --source=gitrepository/flux-system \
   --path="./deploy/namespaces" \
   --prune=true \
   --interval=1m \
-  --export > ./flux-config/microservices-demo/microservices-demo-ns-kustomization.yaml
+  --export > ./flux-config/microservices-demo/microservices-demo-namespace.yaml
 ```
-создастся манифест c kind kustomization, который надо запушить.
+создастся манифест c kind `kustomization`, который надо запушить. Kind Kustomization != шаблон kustomize, а собственная сущность flux которая говорит, что это "просто йамл, а не чарт", репо и тп для синхронизации.
 
 Несмотря на то, что в домашке сказано, что все чарты спокойно могут лежать в /deploy/charts, а ns.yaml мы создаём в deploy и flux как раз отслеживает deploy - это не так, так как возникает ошибка:
 ```log
@@ -4590,6 +4590,8 @@ helm install istiod istiod -n istio-system --repo https://istio-release.storage.
 helm install istio-ingress gateway --namespace istio-ingress --create-namespace --repo https://istio-release.storage.googleapis.com/charts  --wait
 ```
 
+Далее будет продолжение про автоматизацию.
+
 ##### Установка **Flagger**
 Ставим сначала CRD типа Canary для Flagger:
 `kubectl apply -f https://raw.githubusercontent.com/fluxcd/flagger/main/artifacts/flagger/crd.yaml`
@@ -4616,8 +4618,128 @@ metadata:
 
 Чтобы pods обновились, удаляем их всех, ожидая их восстановления.
 
+Переносим файлы манифестов в чарт и делаем их параметризованными, добавляя также 3 части istio (base, isiod и gateway) как зависимости:
+```yaml
+{{- if .Values.frontend.create }}
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: {{ .Values.frontend.name }}
+  namespace: {{.Release.Namespace}}
+spec
+...
+```
+
+И на этом моменте всё ломается, так как если не ставить всё руками в нужном порядке, то ресурсы начинают зависить друг от друга и всё впадает в дед лок.
+
+#### Логика работы **flux ломается**!
+Ошибся, случайно заменив название директории для поиска йамлов в kind kustomization https://gitlab.com/Ivorlun/microservices-demo/-/commit/78978383d0cde4c5f9d01e3a17bcff600b5d44d6#61cd4ee9a0ff10dc6defdfcbb0e9e83eeddc73bb, после чего весь неймспейс был удалён.
+Но! Всё бы ничего, но при этом все хелм чарты ресурсы считались флаксом up-to-date и valid, и, при восстановлении namespace-а, обратно не развернулись, так как flux считал, что все HelmRelease-ы и так впорядке.
+
+Кроме того, после добавления istio-чартов как зависимости для frontend helm chart-а, релиз ломается и не может установить зависимости корректно в правильном порядке.
+
+Сваливается в `retries exhausted`, что можно исправить только руками использовав на релизе `suspend`, а затем `resume`.
+
+При этом, для зависимостей чарта, конечно же не создаются неймспейсы в которые они должны быть установлены и это невозможно никак настроить.
+В итоге были добавлены ещё и kind kustomize-ы для всех namespace istio!
+
+#### **Автоматизация установки istio через flux**
+Так как хотелось автоматизации решено было сделать следующим образом:
+1. `flux create source helm istio` - Добавлем репо helm istio в отслеживаемые
+1. `flux create hr istio-base` - Ставим чарты istio по частям
+1. `flux create hr istio-istiod` - Ставим чарты istio по частям
+1. `flux create hr istio-gateway` - Ставим чарты istio по частям
+1. `flux create kustomization istio-addons` - ставим addon-ы из yaml, как написано в документации
+
+Кроме того, есть ключ `depends on`, который позволяет выстроить порядок установки, НО только между объектами одинакового типа hr-hr, kustomization-kustiomization!.
+
+<details>
+  <summary>Генерация объектов flux утилитой подробно</summary>
+
+```bash
+flux create source helm istio \
+	--url=https://istio-release.storage.googleapis.com/charts \
+	--interval=10m \
+	--export > ./flux-config/istio/chart-source-istio.yaml
+
+flux create hr istio-base \
+  --interval=1m \
+  --source=HelmRepository/istio \
+  --chart=base \
+  --chart-version="1.17.1" \
+  --namespace=istio-system \
+  --create-target-namespace=true \
+  --export >> ./flux-config/istio/helm-istio.yaml
+
+flux create hr istio-istiod \
+  --interval=1m \
+  --source=HelmRepository/istio \
+  --chart=istiod \
+  --chart-version="1.17.1" \
+  --namespace=istio-system \
+  --create-target-namespace=true \
+  --depends-on=istio-system/istio-base \
+  --export >> ./flux-config/istio/helm-istio.yaml
+
+flux create hr istio-gateway \
+  --interval=1m \
+  --source=HelmRepository/istio \
+  --chart=gateway \
+  --chart-version="1.17.1" \
+  --namespace=istio-ingress \
+  --create-target-namespace=true \
+  --depends-on=istio-system/istio-istiod \
+  --export >> ./flux-config/istio/helm-istio.yaml
+
+curl -o ./deploy/istio/addons/prometheus.yaml -L https://raw.githubusercontent.com/istio/istio/1.17.1/samples/addons/prometheus.yaml
+curl -o ./deploy/istio/addons/grafana.yaml -L https://raw.githubusercontent.com/istio/istio/1.17.1/samples/addons/grafana.yaml
+curl -o ./deploy/istio/addons/kiali.yaml -L https://raw.githubusercontent.com/istio/istio/1.17.1/samples/addons/kiali.yaml
+curl -o ./deploy/istio/addons/jaeger.yaml -L https://raw.githubusercontent.com/istio/istio/1.17.1/samples/addons/jaeger.yaml
+
+flux create kustomization istio-addons \
+  --source=gitrepository/flux-system \
+  --path="./deploy/istio/addons" \
+  --prune=true \
+  --interval=1m \
+  --target-namespace=istio-system \
+  --wait \
+  --export >> ./flux-config/istio/istio-addons-yamls.yaml
+```
+</details>
+<br />
+
+Также нужно для всех чартов microservices-demo прописать зависимость от istio helm release, так как без сайдкара будет постоянная ошибка на всех сервисах `error pull image: name "auto"`:
+```yaml
+  dependsOn:
+  - name: istio-istiod
+    namespace: istio-system
+```
+
+Далее, чтобы не было конфликта между установкой Istio flux-ом и зависимостями внутри helm frontend, отключим установку istio зависимостей по умолчанию и изменим шаблоны генерации VirtualSerivce-а и Gateway-я. Для этого в values вносим:
+```yaml
+istio:
+  enabled: false
+```
+В Chart.yaml frontend добавляем:
+```yaml
+...
+    version: "1.17.1"
+    condition: istio.enabled
+  - name: istiod
+...
+```
+И, наконец в template-ы Gateway и Virtual Service добавляем в начало и конец соответственно:
+```yaml
+{{- if .Values.istio.enabled }}
+...
+{{- end }}
+```
+
+
 
 ### HomeWork 16 (Service Mesh)
+
+Хороший сайт с разбором практических кейсов с Istio - https://istiobyexample.dev/
 
 Istio базируется на 4х основных векторах:
 
@@ -4630,13 +4752,13 @@ Istio базируется на 4х основных векторах:
 #### Security
 #### Observability
 
-Istio генерирует детальную телеметрию для всех взаимодействий между сервисами внутри сетки. Телеметрия позволяет наблюдать за поведением сервисов, позволяя администраторам обслуживать и оптимизировать приложения без возложения дополнительной нагрузки на разработчиков. Причём Istio позволяет администраторам понимать как отслеживаемые сервисы взаимодействуют как с другими сервисами, так и с самими компонентами Istio.
+Istio генерирует подробную телеметрию для всех взаимодействий между сервисами внутри сетки. Телеметрия даёт наблюдать за поведением сервисов, позволяя администраторам обслуживать и оптимизировать приложения без возложения дополнительной нагрузки на разработчиков. Причём Istio позволяет администраторам понимать характер взамодействия отслеживаемых сервисов как между собой, так и с самими компонентами Istio.
 
 Istio генетирует следующие типы телеметрии, чтобы предоставить общую картину наблюдаемости для  service mesh:
 
-* **Metrics** Istio генерирует набор метрик основываясь на 4х золотых сигналах мониторинга (“golden signals” of monitoring - latency, traffic, errors, and saturation). Причём Istio предоставляет метрики сразу 3х типов     Proxy-level, Service-level и Mesh Control plane.  A default set of mesh monitoring dashboards built on top of these metrics is also provided.
-* **Distributed Traces**. Istio generates distributed trace spans for each service, providing operators with a detailed understanding of call flows and service dependencies within a mesh.
-* **Access Logs**. As traffic flows into a service within a mesh, Istio can generate a full record of each request, including source and destination metadata. This information enables operators to audit service behavior down to the individual workload instance level.
+* **Metrics** Istio генерирует набор метрик основываясь на 4х золотых сигналах мониторинга (“golden signals” of monitoring - latency, traffic, errors, and saturation). Причём Istio предоставляет метрики сразу 3х типов - Proxy-level, Service-level и Mesh Control plane. Всё это вместе с дашбордами.
+* **Distributed Traces**. Istio генерирует спаны трейсинга для каждого сервиса, предоставляя информацию для понимания как проходит вызов или запрос и через какие зависимости внутри сетки двигается.
+* **Access Logs**. С течением трафика внутри меша Istio может генерировать полную запись на каждый запрос, включая источник и конечную точку. Эта информация позволяет администратору проводить аудиты поведения упавших сервисов на уровне конкретных инстансов и их нагрузок.
 
 #### Extensibility
 WebAssembly is a sandboxing technology which can be used to extend the Istio proxy (Envoy). The Proxy-Wasm sandbox API replaces Mixer as the primary extension mechanism in Istio.
