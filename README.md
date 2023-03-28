@@ -4246,6 +4246,12 @@ deploy/charts/
 
 Обычная установка Istio для однокластерного публичного режима без CNI не требует дополнительных настроек от GKE на данный момент https://istio.io/latest/docs/setup/platform-setup/gke/, кроме cluster-admin RBAC.
 
+```bash
+kubectl create clusterrolebinding cluster-admin-binding \
+    --clusterrole=cluster-admin \
+    --user=$(gcloud config get-value core/account)
+```
+
 <details>
   <summary>**Collapsible block about ASM**</summary>
 
@@ -4601,7 +4607,7 @@ helm install istio-ingress gateway --namespace istio-ingress --create-namespace 
 helm upgrade -i flagger flagger \
 --repo https://flagger.app \
 --namespace=istio-system \
---set crd.create=true \
+--set crd.create=false \
 --set meshProvider=istio \
 --set metricsServer=http://prometheus:9090
 ```
@@ -4645,13 +4651,14 @@ spec
 
 #### **Автоматизация установки istio через flux**
 Так как хотелось автоматизации решено было сделать следующим образом:
-1. `flux create source helm istio` - Добавлем репо helm istio в отслеживаемые
+1. Добавить манифесты с созданием namespace `istio-system` и `istio-ingress` сразу в flux-config
+1. `flux create source helm istio` - Добавлем репо helm istio в отслеживаемые. **ВАЖНО!** Так как CR HelmSource является namespaced, то необходимо создать их 2 штуки для каждого неймспейса, в который мы будем деплоить части istio.
 1. `flux create hr istio-base` - Ставим чарты istio по частям
 1. `flux create hr istio-istiod` - Ставим чарты istio по частям
 1. `flux create hr istio-gateway` - Ставим чарты istio по частям
 1. `flux create kustomization istio-addons` - ставим addon-ы из yaml, как написано в документации
 
-Кроме того, есть ключ `depends on`, который позволяет выстроить порядок установки, НО только между объектами одинакового типа hr-hr, kustomization-kustiomization!.
+Кроме того, есть ключ `depends on`, который позволяет выстроить порядок установки, НО **только между объектами одинакового типа** hr-hr, kustomization-kustiomization!.
 
 <details>
   <summary>Генерация объектов flux утилитой подробно</summary>
@@ -4660,7 +4667,14 @@ spec
 flux create source helm istio \
 	--url=https://istio-release.storage.googleapis.com/charts \
 	--interval=10m \
-	--export > ./flux-config/istio/chart-source-istio.yaml
+  --namespace istio-system \
+	--export >> ./flux-config/istio/chart-source-istio.yaml
+
+flux create source helm istio \
+	--url=https://istio-release.storage.googleapis.com/charts \
+	--interval=10m \
+  --namespace istio-ingress \
+	--export >> ./flux-config/istio/chart-source-istio.yaml
 
 flux create hr istio-base \
   --interval=1m \
@@ -4710,15 +4724,16 @@ flux create kustomization istio-addons \
 
 Также нужно для всех чартов microservices-demo прописать зависимость от istio helm release, так как без сайдкара будет постоянная ошибка на всех сервисах `error pull image: name "auto"`:
 ```yaml
-  dependsOn:
-  - name: istio-istiod
-    namespace: istio-system
+    version: "1.17.1"
+    condition: istio.installRequired
+  - name: istiod
 ```
 
-Далее, чтобы не было конфликта между установкой Istio flux-ом и зависимостями внутри helm frontend, отключим установку istio зависимостей по умолчанию и изменим шаблоны генерации VirtualSerivce-а и Gateway-я. Для этого в values вносим:
+Далее, чтобы не было конфликта между установкой Istio flux-ом и зависимостями внутри helm frontend, отключим установку istio зависимостей по умолчанию и изменим шаблоны генерации VirtualSerivce-а и Gateway-я. Для этого в values вносим одно значение для сервисов, другое для установки чартов истио:
 ```yaml
 istio:
-  enabled: false
+  enabled: true
+  installRequired: false
 ```
 В Chart.yaml frontend добавляем:
 ```yaml
@@ -4730,10 +4745,32 @@ istio:
 ```
 И, наконец в template-ы Gateway и Virtual Service добавляем в начало и конец соответственно:
 ```yaml
+{{- if .Values.frontend.create }}
 {{- if .Values.istio.enabled }}
-...
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: {{ .Values.frontend.name }}
+  namespace: {{.Release.Namespace}}
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - frontend
+  http:
+  - route:
+    - destination:
+        host: frontend
+        port:
+          number: 80
+{{- end }}
 {{- end }}
 ```
+
+По ходу установки столкнулся с проблемой, что предыдущие чарты истио остались, что были прописаны как зависимости для чарта фронтенда, оставили свои кластер роли из-за чего основной релиз не мог установиться корректно, а от него зависили все остальные.
+Увидел это при `describe helmrelease` в логах установки.
+
+Также нужно было исправить grafana yaml в аддоне для истио, так как там был дубликат имени для 3000 порта из-за чего валидатор не давал накатить все аддоны https://gitlab.com/Ivorlun/microservices-demo/-/commit/1a2ff094778ee27487ff158ada865fadb7a63635.
 
 
 
