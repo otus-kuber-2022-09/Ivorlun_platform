@@ -4602,6 +4602,7 @@ helm install istio-ingress gateway --namespace istio-ingress --create-namespace 
 Ставим сначала CRD типа Canary для Flagger:
 `kubectl apply -f https://raw.githubusercontent.com/fluxcd/flagger/main/artifacts/flagger/crd.yaml`
 
+Я так понимаю, CRD устанавливаются не из чарта, с той же целью, что и issuers в Cert-Manager - чтобы отделить жизненный цикл чарта от CR описания обновлений, так что для тестов, в принципе, можно использовать и встроенное создение CRD.
 Устанавливаем flagger и говорим, что меш провайдер - istio:
 ```bash
 helm upgrade -i flagger flagger \
@@ -4743,36 +4744,39 @@ istio:
   - name: istiod
 ...
 ```
-И, наконец в template-ы Gateway и Virtual Service добавляем в начало и конец соответственно:
+И, наконец в template-ы Gateway и Virtual Service добавляем в начало и конец соответственно опции.
+**Важно!!!** Если istio устанавливается через helm, то почему-то **selector для LB** должен быть `istio`, а не `istioingress` как указано ВО ВСЕЙ документации! https://github.com/istio/istio/issues/29680#issuecomment-1472894785
 ```yaml
 {{- if .Values.frontend.create }}
 {{- if .Values.istio.enabled }}
 apiVersion: networking.istio.io/v1beta1
-kind: VirtualService
+kind: Gateway
 metadata:
-  name: {{ .Values.frontend.name }}
+  name: {{ .Values.frontend.name }}-gateway
   namespace: {{.Release.Namespace}}
 spec:
-  hosts:
-  - "*"
-  gateways:
-  - frontend
-  http:
-  - route:
-    - destination:
-        host: frontend
-        port:
-          number: 80
+  selector:
+    istio: ingress
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*"
 {{- end }}
 {{- end }}
 ```
 
-По ходу установки столкнулся с проблемой, что предыдущие чарты истио остались, что были прописаны как зависимости для чарта фронтенда, оставили свои кластер роли из-за чего основной релиз не мог установиться корректно, а от него зависили все остальные.
+По ходу установки столкнулся с проблемой следов от предыдущих чартов истио, которые были прописаны как зависимости для чарта фронтенда и оставили свои кластер роли, из-за чего основной релиз не мог установиться корректно, а из-за него зависили и все остальные.
 Увидел это при `describe helmrelease` в логах установки.
 
 Также нужно было исправить grafana yaml в аддоне для истио, так как там был дубликат имени для 3000 порта из-за чего валидатор не давал накатить все аддоны https://gitlab.com/Ivorlun/microservices-demo/-/commit/1a2ff094778ee27487ff158ada865fadb7a63635.
 
+Помимо прочего с flux-ом возникают постоянные проблемы с namespace-ами: какие-то ресурсы namespaced, какие-то нет, какие-то могут быть связаны друг с другом, но большинство - нет; токен для репо по умолчанию хранится только в одном namespace, из-за чего в других нельзя использовать тот же gitrepository.
+В итоге приходится регистрировать все чарты namespace `microservices-demo` использовать системный `flux-system`, так как только в нём лежит секрет с access token-ом к репо.
 
+Перенесём Flagger во flux, добавив его в директорию с istio.
 
 ### HomeWork 16 (Service Mesh)
 
@@ -4786,6 +4790,8 @@ Istio базируется на 4х основных векторах:
 * Расширяемость - через систему WebAssembly плагинов
 
 #### Traffic management
+
+Virtual services, вместе с правилами назначения - основные кирпичики Istio’s маршрутизации трафика в ней. Каждый виртуальный сервис состоит из набора правил маршрутизации, которые применяются в определённом порядке, позволяя Istio сопоставлять каждый отдельно взятый зарос в виртуальный сервис с точным реальным адресатом внутри меша. Их может потребоваться несколько, а может - ни одного, в зависимости от задач.
 #### Security
 #### Observability
 
