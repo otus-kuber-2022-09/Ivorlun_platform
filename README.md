@@ -4778,6 +4778,12 @@ spec:
 
 Перенесём Flagger во flux, добавив его в директорию с istio.
 
+Столкнулся с проблемой, что если выкатить canary как в ДЗ, то возникает ошибка, так как поля объекта сильно изменились - обновил его в соответствии с документацией.
+
+Однако, почему-то манифест в виде отдельного файла применяется frontend-primary создаётся, а с тем же манифестом внутри хелм чарта возникает ошибка с некорректностью заполнения поля analysis.
+
+
+
 ### HomeWork 16 (Service Mesh)
 
 Хороший сайт с разбором практических кейсов с Istio - https://istiobyexample.dev/
@@ -4881,6 +4887,45 @@ spec:
 
 Также есть другие возможности кастомизации - переписывание маппинга запросов, лейблы и тп.
 Для Istio также можно менять на ходу хедеры, политики, хосты и тп.
+
+Helm release describe выдаёт:
+```bash
+Helm install failed: Canary.flagger.app "frontend" is invalid: spec.analysis: Required value
+```
+
+Helm template
+```yaml
+# Source: frontend/templates/canary.yaml
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: frontend
+  namespace: default
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frontend
+  service:
+    port: 80
+  analysis:
+    interval: 1m
+    threshold: 10
+    maxWeight: 50
+    stepWeight: 5
+    metrics:
+      - name: request-success-rate
+        thresholdRange:
+          min: 99
+        interval: 1m
+      - name: request-duration
+        thresholdRange:
+          max: 500
+        interval: 1m
+```
+
+При этом все нужные компоненты объявлены: https://github.com/fluxcd/flagger/blob/6786668684e96109cac6cffb5fd8615498cbe2b7/artifacts/flagger/crd.yaml#L77 и https://github.com/fluxcd/flagger/blob/6786668684e96109cac6cffb5fd8615498cbe2b7/artifacts/flagger/crd.yaml#L856
+
 
 ###### Canary status
 Сложный объект с множеством полей, но интересует type.
