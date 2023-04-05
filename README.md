@@ -4612,6 +4612,7 @@ helm upgrade -i flagger flagger \
 --set meshProvider=istio \
 --set metricsServer=http://prometheus:9090
 ```
+Важно, чтобы у приложения был лейбл вида `app=frontend`, так как иначе флаггер иначе не сможет дописать суффиксы вида `app=frontend-canary`
 
 Добавляем в ns `microservices-demo` (deploy/namespaces/namespace.yaml) label, чтобы istio автоматически добавлял во все поды сайдкары
 ```yaml
@@ -4782,6 +4783,35 @@ spec:
 
 Однако, почему-то манифест в виде отдельного файла применяется frontend-primary создаётся, а с тем же манифестом внутри хелм чарта возникает ошибка с некорректностью заполнения поля analysis.
 
+После пересоздания кластера ошибка ушла - к сожалению, не смог её воспроизвести, и после, всё работает отлично - создаётся CR типа Canary, pod frontend-а получает суффикс primary и соответствующие сервисы.
+
+Однако, почему-то при этом по externalIP сервису фронт недоступен, а по Istio Gateway-ю выдаёт 503 ошибку:
+`upstream connect error or disconnect/reset before headers. reset reason: connection failure, transport failure reason: delayed connect error: 111`
+
+Обнаружил, что всё работает до тех пор, пока не создаётся canary VirtualService `frontend`, а как только он создаётся, то получается, что есть 2 виртуальных сервиса, которые указывают на один и тот же хост - `frontend` и `frontend-ingress`.
+Связано это с тем, что если название приложения и сервиса для него не совпадают, то истио и флаггер по умолчанию считают, что сервис нужно создать, что в итоге приводит к дупликации.
+
+Если назвать virtual service `frontend` так же как и сам pod `frontend`, то всё работает и никаких проблем нет.
+
+Также были проблемы с HelmRelease, связанные с тем, что когда переименовал объект типа VirtualService, то чарт не смог обновиться, так как новый чарт уже не имел этого объекта внутри себя и flux посчитал, что он не может его обновить. Решил ручным удалением `helm uninstall` и `flux reconcile helmrelease frontend`.
+
+```bash
+❯ k -n microservices-demo get pods
+NAME                                     READY   STATUS    RESTARTS   AGE
+adservice-6868b58545-qn9pz               2/2     Running   0          102m
+cartservice-746575467b-vlffg             2/2     Running   0          102m
+currencyservice-c6dd66c9-bffvw           2/2     Running   0          102m
+emailservice-947bf9987-2hqfz             2/2     Running   0          102m
+frontend-7767bbfc98-xnthc                2/2     Running   0          56s
+frontend-primary-5c55fc7456-trs7k        2/2     Running   0          16m
+loadgenerator-6df95754c4-9dlfk           2/2     Running   0          101m
+paymentservice-5774c49d4c-d9n6s          2/2     Running   0          101m
+productcatalogservice-565dd846cf-k2btx   2/2     Running   0          101m
+recommendationservice-747d8956d9-2mh9q   2/2     Running   0          101m
+redis-cart-74c74c6869-nbj27              2/2     Running   0          102m
+shippingservice-7d57898d79-g75br         2/2     Running   0          101m
+```
+
 
 
 ### HomeWork 16 (Service Mesh)
@@ -4798,6 +4828,8 @@ Istio базируется на 4х основных векторах:
 #### Traffic management
 
 Virtual services, вместе с правилами назначения - основные кирпичики Istio’s маршрутизации трафика в ней. Каждый виртуальный сервис состоит из набора правил маршрутизации, которые применяются в определённом порядке, позволяя Istio сопоставлять каждый отдельно взятый зарос в виртуальный сервис с точным реальным адресатом внутри меша. Их может потребоваться несколько, а может - ни одного, в зависимости от задач.
+
+
 #### Security
 #### Observability
 
