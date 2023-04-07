@@ -4812,7 +4812,23 @@ redis-cart-74c74c6869-nbj27              2/2     Running   0          102m
 shippingservice-7d57898d79-g75br         2/2     Running   0          101m
 ```
 
-
+Virtual service после выкатки новой версии с 100/0 на 95/5:
+```yaml
+  spec:
+    gateways:
+    - mesh
+    hosts:
+    - frontend
+    http:
+    - route:
+      - destination:
+          host: frontend-primary
+        weight: 95
+      - destination:
+          host: frontend-canary
+        weight: 5
+```
+gateway поменялся на mesh после создания новой версии.
 
 ### HomeWork 16 (Service Mesh)
 
